@@ -125,6 +125,29 @@ export function formatRemaining(expiresAt: string | null, now: number = Date.now
 }
 
 /**
+ * Base 1024, comme le panel: la limite remonte en 22528 MB, soit 22 Go pile.
+ * Sans limite connue on n'affiche que la conso.
+ */
+export function formatMemory(usedMb: number, limitMb: number): string {
+  const go = (mb: number) => (mb / 1024).toFixed(1)
+  return limitMb > 0 ? `${go(usedMb)} / ${go(limitMb)} Go` : `${go(usedMb)} Go`
+}
+
+export function formatDisk(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} Go`
+}
+
+/**
+ * Jauge de charge CPU/RAM. Un pack moddé sature la RAM avant de crasher, donc
+ * l'orange arrive a 75 % pour laisser le temps de reagir.
+ */
+export function loadSignal(fraction: number): Signal {
+  if (fraction >= 0.9) return 'fault'
+  if (fraction >= 0.75) return 'warn'
+  return 'live'
+}
+
+/**
  * Le worker refuse de tourner tant que le serveur actif tient encore plus de
  * ROTATION_SKIP_ABOVE_HOURS heures (defaut 6, cf. worker.py). Predire ce que
  * fera le prochain creneau evite d'aller lire les logs pour savoir si la nuit

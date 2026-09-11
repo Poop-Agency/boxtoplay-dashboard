@@ -3,9 +3,12 @@ import { useQuery } from '@tanstack/react-query'
 
 import { Fault, Gauge, Lamp, PageHead, Panel, Readout, State, Well } from '@/components/ui/instrument'
 import {
+  formatDisk,
+  formatMemory,
   formatOutlook,
   formatRemaining,
   formatWorkflowState,
+  loadSignal,
   nextRotationAt,
   outlookSignal,
   rotationOutlook,
@@ -13,8 +16,8 @@ import {
   trialSignal,
   workflowSignal,
 } from '@/lib/dashboard'
-import { getServerVitals } from '@/server/btp'
-import { getGistState, getMinecraftStatus, getRecentWorkflows } from '@/server/dashboard'
+import { getServerStats, getServerVitals } from '@/server/btp'
+import { getAliasStatus, getGistState, getRecentWorkflows } from '@/server/dashboard'
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
@@ -23,10 +26,17 @@ export const Route = createFileRoute('/')({
 const ALIAS_HOST = 'orny.boxtoplay.com'
 
 function DashboardPage() {
-  const status = useQuery({
-    queryKey: ['minecraft-status'],
-    queryFn: () => getMinecraftStatus(),
+  const alias = useQuery({
+    queryKey: ['alias-status'],
+    queryFn: () => getAliasStatus(),
     refetchInterval: 60_000,
+  })
+
+  // Le cache serveur est de 10 s: relire plus vite ne servirait a rien.
+  const stats = useQuery({
+    queryKey: ['server-stats'],
+    queryFn: () => getServerStats(),
+    refetchInterval: 10_000,
   })
 
   const vitals = useQuery({
@@ -54,7 +64,7 @@ function DashboardPage() {
         note="Le serveur migre seul entre deux comptes toutes les huit heures. Cet écran lit son état, il n'agit pas dessus."
       />
 
-      <StatusBanner status={status} vitals={vitals} />
+      <StatusBanner alias={alias} stats={stats} vitals={vitals} />
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
         <PanelVitals vitals={vitals} />
@@ -71,18 +81,27 @@ function DashboardPage() {
 // -----------------------------------------------------------------------------
 
 function StatusBanner({
-  status,
+  alias,
+  stats,
   vitals,
 }: {
-  status: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getMinecraftStatus>>>>
+  alias: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getAliasStatus>>>>
+  stats: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerStats>>>>
   vitals: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerVitals>>>>
 }) {
-  const online = status.data?.online === true
-  const signal = status.isPending ? 'idle' : online ? 'live' : 'fault'
+  // runtime_status fait foi, comme pour la presence du bot.
+  const online = stats.data?.runtimeStatus === 'started'
+  const signal = stats.isPending ? 'idle' : stats.isError ? 'warn' : online ? 'live' : 'fault'
   const expiresAt = vitals.data?.expiresAt ?? null
+  const host = alias.data?.host ?? vitals.data?.connectionAddress ?? ALIAS_HOST
 
-  const players = status.data?.playersOnline ?? 0
-  const slots = status.data?.playersMax ?? 0
+  const players = stats.data?.playersOnline ?? 0
+  const slots = stats.data?.playersMax ?? 0
+  const cpu = Math.round(stats.data?.cpuPercent ?? 0)
+  const memory = stats.data?.memoryMb ?? 0
+  const memoryLimit = stats.data?.memoryLimitMb ?? 0
+  const disk = stats.data?.diskBytes ?? 0
+  const names = stats.data?.players ?? []
 
   return (
     <section className="panel arrive overflow-hidden">
@@ -91,11 +110,15 @@ function StatusBanner({
           <Lamp signal={signal} className="h-3.5 w-3.5" />
           <div>
             <p className="text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">
-              {status.isPending ? 'Lecture…' : online ? 'En ligne' : 'Hors ligne'}
+              {stats.isPending
+                ? 'Lecture…'
+                : stats.isError
+                  ? 'API BTP injoignable'
+                  : online
+                    ? 'En ligne'
+                    : 'Hors ligne'}
             </p>
-            <p className="readout mt-1 text-sm text-ink-dim">
-              {status.data?.host ?? ALIAS_HOST}
-            </p>
+            <p className="readout mt-1 text-sm text-ink-dim">{host}</p>
           </div>
         </div>
 
@@ -116,14 +139,14 @@ function StatusBanner({
         </div>
       </div>
 
-      {status.data?.aliasOnline === false && (
+      {alias.data?.aliasOnline === false && (
         <div className="flex items-start gap-3 border-t border-edge-soft bg-ground/50 px-4 py-3 sm:px-6">
           <Lamp signal="warn" className="mt-1" />
           <p className="max-w-[80ch] text-xs text-ink-dim">
             <span className="text-warn">Alias DNS incohérent.</span>{' '}
             <span className="readout">{ALIAS_HOST}</span> porte encore un enregistrement SRV vers
             un serveur éteint : une connexion sur deux échoue. Adresse directe pour l'instant,{' '}
-            <span className="readout text-ink">{status.data.host}</span> — elle change à chaque
+            <span className="readout text-ink">{alias.data.host}</span> — elle change à chaque
             rotation, donc à redonner après chaque bascule.
           </p>
         </div>
@@ -142,8 +165,34 @@ function StatusBanner({
             />
           )}
         </Cell>
-        <Cell label="État panel" value={vitals.data?.runtimeStatus ?? '—'} />
+        <Cell label="État panel" value={stats.data?.runtimeStatus ?? '—'} />
       </div>
+
+      <div className="grid grid-cols-1 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-3">
+        <Cell label="CPU" value={online ? `${cpu} %` : '—'}>
+          {online && (
+            <Gauge className="mt-2.5" label="Charge CPU" value={Math.min(1, cpu / 100)} signal={loadSignal(cpu / 100)} />
+          )}
+        </Cell>
+        <Cell label="Mémoire" value={online ? formatMemory(memory, memoryLimit) : '—'}>
+          {online && memoryLimit > 0 && (
+            <Gauge
+              className="mt-2.5"
+              label="Mémoire utilisée"
+              value={Math.min(1, memory / memoryLimit)}
+              signal={loadSignal(memory / memoryLimit)}
+            />
+          )}
+        </Cell>
+        <Cell label="Disque" value={disk > 0 ? formatDisk(disk) : '—'} />
+      </div>
+
+      {online && names.length > 0 && (
+        <div className="border-t border-edge-soft px-4 py-3 sm:px-6">
+          <p className="engraved">Connectés</p>
+          <p className="readout mt-2 text-sm text-ink">{names.join(' · ')}</p>
+        </div>
+      )}
     </section>
   )
 }
