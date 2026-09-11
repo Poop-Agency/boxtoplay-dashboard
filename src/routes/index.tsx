@@ -19,7 +19,7 @@ import {
   workflowSignal,
 } from '@/lib/dashboard'
 import { getServerHistory, getServerStats, getServerVitals } from '@/server/btp'
-import { getAliasStatus, getGistState, getRecentWorkflows } from '@/server/dashboard'
+import { getGistState, getRecentWorkflows } from '@/server/dashboard'
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
@@ -28,12 +28,6 @@ export const Route = createFileRoute('/')({
 const ALIAS_HOST = 'orny.boxtoplay.com'
 
 function DashboardPage() {
-  const alias = useQuery({
-    queryKey: ['alias-status'],
-    queryFn: () => getAliasStatus(),
-    refetchInterval: 60_000,
-  })
-
   // Le cache serveur est de 10 s: relire plus vite ne servirait a rien.
   const stats = useQuery({
     queryKey: ['server-stats'],
@@ -72,7 +66,7 @@ function DashboardPage() {
         note="Le serveur migre seul entre deux comptes toutes les huit heures. Cet écran lit son état, il n'agit pas dessus."
       />
 
-      <StatusBanner alias={alias} stats={stats} vitals={vitals} />
+      <StatusBanner stats={stats} vitals={vitals} />
 
       <HistoryPanel history={history} />
 
@@ -91,11 +85,9 @@ function DashboardPage() {
 // -----------------------------------------------------------------------------
 
 function StatusBanner({
-  alias,
   stats,
   vitals,
 }: {
-  alias: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getAliasStatus>>>>
   stats: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerStats>>>>
   vitals: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerVitals>>>>
 }) {
@@ -103,7 +95,7 @@ function StatusBanner({
   const online = stats.data?.runtimeStatus === 'started'
   const signal = stats.isPending ? 'idle' : stats.isError ? 'warn' : online ? 'live' : 'fault'
   const expiresAt = vitals.data?.expiresAt ?? null
-  const host = vitals.data?.connectionAddress ?? alias.data?.host ?? ALIAS_HOST
+  const host = vitals.data?.connectionAddress ?? ALIAS_HOST
 
   const players = stats.data?.playersOnline ?? 0
   const slots = stats.data?.playersMax ?? 0
@@ -148,19 +140,6 @@ function StatusBanner({
           />
         </div>
       </div>
-
-      {alias.data?.aliasOnline === false && (
-        <div className="flex items-start gap-3 border-t border-edge-soft bg-ground/50 px-4 py-3 sm:px-6">
-          <Lamp signal="warn" className="mt-1" />
-          <p className="max-w-[80ch] text-xs text-ink-dim">
-            <span className="text-warn">Alias DNS incohérent.</span>{' '}
-            <span className="readout">{ALIAS_HOST}</span> porte encore un enregistrement SRV vers
-            un serveur éteint : une connexion sur deux échoue. Adresse directe pour l'instant,{' '}
-            <span className="readout text-ink">{alias.data.host}</span> — elle change à chaque
-            rotation, donc à redonner après chaque bascule.
-          </p>
-        </div>
-      )}
 
       <div className="grid grid-cols-2 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-4">
         <Cell label="Serveur" value={vitals.data?.displayId ? `#${vitals.data.displayId}` : '—'} />

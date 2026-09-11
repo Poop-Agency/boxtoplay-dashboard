@@ -142,9 +142,9 @@ let vitalsCache: { data: ServerVitals; key: string; expiresAt: number } | null =
 let vitalsInFlight: Promise<{ data: ServerVitals; key: string }> | null = null
 
 /**
- * Les vitals, et la cle du compte qui porte le serveur vivant. Stats,
- * historique et alias la demandent tous au chargement de la page: une seule
- * releve en vol pour tous, sinon quatre balayages des deux comptes partent en
+ * Les vitals, et la cle du compte qui porte le serveur vivant. Vitals, stats
+ * et historique la demandent tous au chargement de la page: une seule
+ * releve en vol pour tous, sinon trois balayages des deux comptes partent en
  * rafale sur le quota que partagent le worker et le bot.
  */
 async function loadVitals(): Promise<{ data: ServerVitals; key: string }> {

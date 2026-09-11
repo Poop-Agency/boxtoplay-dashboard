@@ -18,5 +18,4 @@ Source: [`src/server/dashboard.ts`](../../../../src/server/dashboard.ts), [`src/
 ## APIs externes
 
 - GitHub API (workflows)
-- BoxToPlay API (modpacks)
-- mcsrvstat.us (statut serveur)
+- BoxToPlay API (modpacks, statut, stats et historique du serveur)
