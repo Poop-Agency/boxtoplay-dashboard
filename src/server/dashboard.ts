@@ -54,6 +54,8 @@ const ALIAS_HOST = 'orny.boxtoplay.com'
 export const getAliasStatus = createServerFn({ method: 'GET' }).handler(async (): Promise<AliasStatus> => {
   // Le panel fait foi sur l'adresse. S'il est injoignable on retombe sur
   // l'alias, qui vaut mieux que rien meme quand il est a moitie casse.
+  // Passer par la server fn, pas par loadVitals: ce fichier est aussi importe
+  // cote client, et un import direct y embarque node:dns.
   const vitals = await getServerVitals().catch(() => null)
   const host = vitals?.connectionAddress ?? ALIAS_HOST
 

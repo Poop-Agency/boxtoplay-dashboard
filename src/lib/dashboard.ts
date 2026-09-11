@@ -148,6 +148,19 @@ export function loadSignal(fraction: number): Signal {
 }
 
 /**
+ * Haut d'echelle rond (1, 2, 5 x 10^n) pour les courbes. Le plancher evite
+ * qu'un CPU a 1 % remplisse tout le graphe comme s'il saturait.
+ */
+export function niceCeil(value: number, floor: number): number {
+  const target = Math.max(value, floor)
+  const step = 10 ** Math.floor(Math.log10(target))
+  for (const multiple of [1, 2, 5]) {
+    if (multiple * step >= target) return multiple * step
+  }
+  return 10 * step
+}
+
+/**
  * Le worker refuse de tourner tant que le serveur actif tient encore plus de
  * ROTATION_SKIP_ABOVE_HOURS heures (defaut 6, cf. worker.py). Predire ce que
  * fera le prochain creneau evite d'aller lire les logs pour savoir si la nuit

@@ -139,11 +139,26 @@ async function resolveHostname(address: string | null): Promise<string | null> {
 
 let vitalsCache: { data: ServerVitals; key: string; expiresAt: number } | null = null
 
-/** Les vitals, et la cle du compte qui porte le serveur vivant. */
+let vitalsInFlight: Promise<{ data: ServerVitals; key: string }> | null = null
+
+/**
+ * Les vitals, et la cle du compte qui porte le serveur vivant. Stats,
+ * historique et alias la demandent tous au chargement de la page: une seule
+ * releve en vol pour tous, sinon quatre balayages des deux comptes partent en
+ * rafale sur le quota que partagent le worker et le bot.
+ */
 async function loadVitals(): Promise<{ data: ServerVitals; key: string }> {
   if (vitalsCache && vitalsCache.expiresAt > Date.now()) {
     return vitalsCache
   }
+
+  vitalsInFlight ??= fetchVitals().finally(() => {
+    vitalsInFlight = null
+  })
+  return vitalsInFlight
+}
+
+async function fetchVitals(): Promise<{ data: ServerVitals; key: string }> {
 
   const keys = collectApiKeys(process.env)
 
@@ -289,4 +304,59 @@ export const getServerStats = createServerFn({ method: 'GET' }).handler(async ()
 
   statsCache = { data: stats, expiresAt: Date.now() + STATS_CACHE_TTL_MS }
   return stats
+})
+
+// https://api.boxtoplay.com/docs#tag/minecraft/GET/services/minecraft/{serverId}/metrics/history
+interface BtpHistorySample {
+  sampled_at?: string
+  players_peak?: number
+  /** Deja au chiffre du panel: 1 quand /metrics rend 50 brut sur 32 threads. */
+  cpu_usage_percent_average?: number
+  memory_used_bytes_average?: number
+  memory_limit_bytes?: number
+}
+
+export interface HistoryPoint {
+  at: string
+  players: number
+  cpuPercent: number
+  memoryBytes: number
+  memoryLimitBytes: number
+}
+
+// `day` rend un point toutes les 30 min depuis le lancement, soit l'essai
+// entier; `hour` n'en rend que deux. Rien de neuf avant 30 min: 5 min de cache.
+const HISTORY_CACHE_TTL_MS = 5 * 60_000
+let historyCache: { serverId: string; data: HistoryPoint[]; expiresAt: number } | null = null
+
+export const getServerHistory = createServerFn({ method: 'GET' }).handler(async (): Promise<HistoryPoint[]> => {
+  const { data: vitals, key } = await loadVitals()
+
+  if (historyCache && historyCache.serverId === vitals.serverId && historyCache.expiresAt > Date.now()) {
+    return historyCache.data
+  }
+
+  const data = await btpFetch<{ history?: BtpHistorySample[] }>(
+    `/services/minecraft/${vitals.serverId}/metrics/history`,
+    { timeframe: 'day' },
+    REQUEST_TIMEOUT_MS,
+    key,
+  )
+
+  const points = (data.history ?? []).flatMap((sample): HistoryPoint[] =>
+    sample.sampled_at
+      ? [
+          {
+            at: sample.sampled_at,
+            players: sample.players_peak ?? 0,
+            cpuPercent: sample.cpu_usage_percent_average ?? 0,
+            memoryBytes: sample.memory_used_bytes_average ?? 0,
+            memoryLimitBytes: sample.memory_limit_bytes ?? 0,
+          },
+        ]
+      : [],
+  )
+
+  historyCache = { serverId: vitals.serverId, data: points, expiresAt: Date.now() + HISTORY_CACHE_TTL_MS }
+  return points
 })

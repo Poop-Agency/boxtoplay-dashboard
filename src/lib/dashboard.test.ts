@@ -10,6 +10,7 @@ import {
   getWorkflowTone,
   loadSignal,
   nextRotationAt,
+  niceCeil,
   trialFraction,
   trialSignal,
   workflowSignal,
@@ -30,6 +31,14 @@ describe('server stats formatting', () => {
     expect(loadSignal(9097 / 22528)).toBe('live')
     expect(loadSignal(0.75)).toBe('warn')
     expect(loadSignal(0.95)).toBe('fault')
+  })
+
+  it('rounds chart scales up to 1, 2 or 5 x 10^n, never below the floor', () => {
+    expect(niceCeil(0, 10)).toBe(10)
+    expect(niceCeil(3, 4)).toBe(5)
+    expect(niceCeil(12, 10)).toBe(20)
+    expect(niceCeil(23, 10)).toBe(50)
+    expect(niceCeil(60, 10)).toBe(100)
   })
 })
 
