@@ -1,16 +1,46 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  formatDisk,
+  formatMemory,
   formatOutlook,
   rotationOutlook,
   formatRemaining,
   formatWorkflowState,
   getWorkflowTone,
+  loadSignal,
   nextRotationAt,
+  niceCeil,
   trialFraction,
   trialSignal,
   workflowSignal,
 } from './dashboard'
+
+// Releve reel /metrics du 2026-09-11 sur #957036 (ATM9, 0 joueur).
+describe('server stats formatting', () => {
+  it('formats memory like the panel, base 1024', () => {
+    expect(formatMemory(9097, 22528)).toBe('8.9 / 22.0 Go')
+    expect(formatMemory(9097, 0)).toBe('8.9 Go')
+  })
+
+  it('formats disk usage in Go', () => {
+    expect(formatDisk(9959583744)).toBe('9.3 Go')
+  })
+
+  it('warns at 75 % load and faults at 90 %', () => {
+    expect(loadSignal(9097 / 22528)).toBe('live')
+    expect(loadSignal(0.75)).toBe('warn')
+    expect(loadSignal(0.95)).toBe('fault')
+  })
+
+  it('rounds chart scales up to 1, 2 or 5 x 10^n, never below the floor', () => {
+    expect(niceCeil(0, 10)).toBe(10)
+    expect(niceCeil(3, 4)).toBe(5)
+    expect(niceCeil(12, 10)).toBe(20)
+    expect(niceCeil(23, 10)).toBe(50)
+    expect(niceCeil(60, 10)).toBe(100)
+  })
+})
 
 describe('getWorkflowTone', () => {
   it('returns success when a run completed successfully', () => {

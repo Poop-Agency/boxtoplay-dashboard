@@ -28,6 +28,12 @@
   --color-fault: oklch(0.64 0.19 27);
   --color-idle: oklch(0.60 0.020 62);
 
+  /* Series de l'historique: l'identite d'une mesure, jamais un etat. Slots 1-3
+     de la palette categorielle dataviz, valides tous-couples sur le panel. */
+  --color-series-players: #3987e5;
+  --color-series-cpu: #d95926;
+  --color-series-memory: #199e70;
+
   --radius-panel: 3px;
   --radius-control: 2px;
 

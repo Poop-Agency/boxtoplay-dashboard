@@ -1,20 +1,25 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 
 import { Fault, Gauge, Lamp, PageHead, Panel, Readout, State, Well } from '@/components/ui/instrument'
 import {
+  formatDisk,
+  formatMemory,
   formatOutlook,
   formatRemaining,
   formatWorkflowState,
+  loadSignal,
   nextRotationAt,
+  niceCeil,
   outlookSignal,
   rotationOutlook,
   trialFraction,
   trialSignal,
   workflowSignal,
 } from '@/lib/dashboard'
-import { getServerVitals } from '@/server/btp'
-import { getGistState, getMinecraftStatus, getRecentWorkflows } from '@/server/dashboard'
+import { getServerHistory, getServerStats, getServerVitals } from '@/server/btp'
+import { getGistState, getRecentWorkflows } from '@/server/dashboard'
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
@@ -23,10 +28,17 @@ export const Route = createFileRoute('/')({
 const ALIAS_HOST = 'orny.boxtoplay.com'
 
 function DashboardPage() {
-  const status = useQuery({
-    queryKey: ['minecraft-status'],
-    queryFn: () => getMinecraftStatus(),
-    refetchInterval: 60_000,
+  // Le cache serveur est de 10 s: relire plus vite ne servirait a rien.
+  const stats = useQuery({
+    queryKey: ['server-stats'],
+    queryFn: () => getServerStats(),
+    refetchInterval: 10_000,
+  })
+
+  const history = useQuery({
+    queryKey: ['server-history'],
+    queryFn: () => getServerHistory(),
+    refetchInterval: 5 * 60_000,
   })
 
   const vitals = useQuery({
@@ -54,7 +66,9 @@ function DashboardPage() {
         note="Le serveur migre seul entre deux comptes toutes les huit heures. Cet écran lit son état, il n'agit pas dessus."
       />
 
-      <StatusBanner status={status} vitals={vitals} />
+      <StatusBanner stats={stats} vitals={vitals} />
+
+      <HistoryPanel history={history} />
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
         <PanelVitals vitals={vitals} />
@@ -71,18 +85,25 @@ function DashboardPage() {
 // -----------------------------------------------------------------------------
 
 function StatusBanner({
-  status,
+  stats,
   vitals,
 }: {
-  status: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getMinecraftStatus>>>>
+  stats: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerStats>>>>
   vitals: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerVitals>>>>
 }) {
-  const online = status.data?.online === true
-  const signal = status.isPending ? 'idle' : online ? 'live' : 'fault'
+  // runtime_status fait foi, comme pour la presence du bot.
+  const online = stats.data?.runtimeStatus === 'started'
+  const signal = stats.isPending ? 'idle' : stats.isError ? 'warn' : online ? 'live' : 'fault'
   const expiresAt = vitals.data?.expiresAt ?? null
+  const host = vitals.data?.connectionAddress ?? ALIAS_HOST
 
-  const players = status.data?.playersOnline ?? 0
-  const slots = status.data?.playersMax ?? 0
+  const players = stats.data?.playersOnline ?? 0
+  const slots = stats.data?.playersMax ?? 0
+  const cpu = Math.round(stats.data?.cpuPercent ?? 0)
+  const memory = stats.data?.memoryMb ?? 0
+  const memoryLimit = stats.data?.memoryLimitMb ?? 0
+  const disk = stats.data?.diskBytes ?? 0
+  const names = stats.data?.players ?? []
 
   return (
     <section className="panel arrive overflow-hidden">
@@ -91,11 +112,15 @@ function StatusBanner({
           <Lamp signal={signal} className="h-3.5 w-3.5" />
           <div>
             <p className="text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">
-              {status.isPending ? 'Lecture…' : online ? 'En ligne' : 'Hors ligne'}
+              {stats.isPending
+                ? 'Lecture…'
+                : stats.isError
+                  ? 'API BTP injoignable'
+                  : online
+                    ? 'En ligne'
+                    : 'Hors ligne'}
             </p>
-            <p className="readout mt-1 text-sm text-ink-dim">
-              {status.data?.host ?? ALIAS_HOST}
-            </p>
+            <p className="readout mt-1 text-sm text-ink-dim">{host}</p>
           </div>
         </div>
 
@@ -116,19 +141,6 @@ function StatusBanner({
         </div>
       </div>
 
-      {status.data?.aliasOnline === false && (
-        <div className="flex items-start gap-3 border-t border-edge-soft bg-ground/50 px-4 py-3 sm:px-6">
-          <Lamp signal="warn" className="mt-1" />
-          <p className="max-w-[80ch] text-xs text-ink-dim">
-            <span className="text-warn">Alias DNS incohérent.</span>{' '}
-            <span className="readout">{ALIAS_HOST}</span> porte encore un enregistrement SRV vers
-            un serveur éteint : une connexion sur deux échoue. Adresse directe pour l'instant,{' '}
-            <span className="readout text-ink">{status.data.host}</span> — elle change à chaque
-            rotation, donc à redonner après chaque bascule.
-          </p>
-        </div>
-      )}
-
       <div className="grid grid-cols-2 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-4">
         <Cell label="Serveur" value={vitals.data?.displayId ? `#${vitals.data.displayId}` : '—'} />
         <Cell label="Modpack" value={vitals.data?.installedModpack ?? '—'} />
@@ -142,8 +154,34 @@ function StatusBanner({
             />
           )}
         </Cell>
-        <Cell label="État panel" value={vitals.data?.runtimeStatus ?? '—'} />
+        <Cell label="État panel" value={stats.data?.runtimeStatus ?? '—'} />
       </div>
+
+      <div className="grid grid-cols-1 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-3">
+        <Cell label="CPU" value={online ? `${cpu} %` : '—'}>
+          {online && (
+            <Gauge className="mt-2.5" label="Charge CPU" value={Math.min(1, cpu / 100)} signal={loadSignal(cpu / 100)} />
+          )}
+        </Cell>
+        <Cell label="Mémoire" value={online ? formatMemory(memory, memoryLimit) : '—'}>
+          {online && memoryLimit > 0 && (
+            <Gauge
+              className="mt-2.5"
+              label="Mémoire utilisée"
+              value={Math.min(1, memory / memoryLimit)}
+              signal={loadSignal(memory / memoryLimit)}
+            />
+          )}
+        </Cell>
+        <Cell label="Disque" value={disk > 0 ? formatDisk(disk) : '—'} />
+      </div>
+
+      {online && names.length > 0 && (
+        <div className="border-t border-edge-soft px-4 py-3 sm:px-6">
+          <p className="engraved">Connectés</p>
+          <p className="readout mt-2 text-sm text-ink">{names.join(' · ')}</p>
+        </div>
+      )}
     </section>
   )
 }
@@ -394,6 +432,205 @@ function AccountRow({
       <span className="readout ml-auto text-xs text-ink-dim">
         {account.expiresAt ? formatRemaining(account.expiresAt) : 'aucun essai vivant'}
       </span>
+    </div>
+  )
+}
+
+// -----------------------------------------------------------------------------
+// Historique: trois petits multiples plutot qu'un graphe a plusieurs axes,
+// joueurs, CPU et memoire n'ont pas la meme echelle.
+// -----------------------------------------------------------------------------
+
+const GIB = 1024 ** 3
+
+const formatTime = (at: string) =>
+  new Date(at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+
+function HistoryPanel({
+  history,
+}: {
+  history: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerHistory>>>>
+}) {
+  const points = history.data ?? []
+  const players = points.map((point) => ({ at: point.at, value: point.players }))
+  const cpu = points.map((point) => ({ at: point.at, value: point.cpuPercent }))
+  const memory = points.map((point) => ({ at: point.at, value: point.memoryBytes / GIB }))
+  const memoryLimit = (points[points.length - 1]?.memoryLimitBytes ?? 0) / GIB
+  const peak = (series: { value: number }[]) => Math.max(0, ...series.map((point) => point.value))
+
+  return (
+    <Panel title="Historique" note="Depuis le lancement de l'essai · un point toutes les 30 min">
+      <div className="p-4 sm:p-5">
+        {history.isPending ? (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <Well key={i} className="h-[124px] w-full" />
+            ))}
+          </div>
+        ) : history.isError ? (
+          <Fault>L'API BoxToPlay n'a pas rendu l'historique des mesures.</Fault>
+        ) : points.length < 2 ? (
+          <p className="text-sm text-ink-dim">
+            Pas encore assez d'échantillons : un point toutes les 30 min après le démarrage.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              <HistoryChart
+                label="Joueurs · pic"
+                color="var(--color-series-players)"
+                points={players}
+                max={niceCeil(peak(players), 4)}
+                format={(value) => String(Math.round(value))}
+              />
+              <HistoryChart
+                label="CPU · moyenne"
+                color="var(--color-series-cpu)"
+                points={cpu}
+                max={niceCeil(peak(cpu), 10)}
+                format={(value) => `${Math.round(value)} %`}
+              />
+              <HistoryChart
+                label="Mémoire · moyenne"
+                color="var(--color-series-memory)"
+                points={memory}
+                max={memoryLimit > 0 ? memoryLimit : niceCeil(peak(memory), 1)}
+                format={(value) => `${value.toFixed(1)} Go`}
+              />
+            </div>
+
+            <details className="mt-5 border-t border-edge-soft pt-3">
+              <summary className="engraved cursor-pointer">Valeurs</summary>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-edge-soft">
+                      <th className="engraved pb-2 pr-4">Heure</th>
+                      <th className="engraved pb-2 pr-4 text-right">Joueurs</th>
+                      <th className="engraved pb-2 pr-4 text-right">CPU</th>
+                      <th className="engraved pb-2 text-right">Mémoire</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {points.map((point) => (
+                      <tr key={point.at} className="border-b border-edge-soft/60 last:border-0">
+                        <td className="readout py-1.5 pr-4 text-xs text-ink-dim">{formatTime(point.at)}</td>
+                        <td className="readout py-1.5 pr-4 text-right text-xs text-ink tabular-nums">
+                          {point.players}
+                        </td>
+                        <td className="readout py-1.5 pr-4 text-right text-xs text-ink tabular-nums">
+                          {Math.round(point.cpuPercent)} %
+                        </td>
+                        <td className="readout py-1.5 text-right text-xs text-ink tabular-nums">
+                          {(point.memoryBytes / GIB).toFixed(1)} Go
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+/**
+ * Une serie, une couleur neutre: les couleurs de signal sont reservees a
+ * l'etat. La lecture en tete suit le pointeur (ou les fleches), et montre le
+ * dernier point sinon, donc aucune valeur n'est cachee derriere un survol.
+ */
+function HistoryChart({
+  label,
+  color,
+  points,
+  max,
+  format,
+}: {
+  label: string
+  /** Couleur de la mesure, ex. `var(--color-series-cpu)`. Jamais sur du texte. */
+  color: string
+  points: { at: string; value: number }[]
+  max: number
+  format: (value: number) => string
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const last = points.length - 1
+  const shown = hover ?? last
+  const clamp = (i: number) => Math.max(0, Math.min(last, i))
+  const x = (i: number) => (i / last) * 100
+  const y = (value: number) => 100 - (Math.max(0, Math.min(value, max)) / max) * 100
+  const line = points.map((point, i) => `${x(i)},${y(point.value)}`).join(' ')
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="engraved flex items-center gap-2">
+          <span aria-hidden className="h-0.5 w-3 rounded-full" style={{ background: color }} />
+          {label}
+        </span>
+        <span className="text-xs text-ink-label">
+          <span className="readout text-sm text-ink">{format(points[shown].value)}</span>
+          {' · '}
+          {formatTime(points[shown].at)}
+        </span>
+      </div>
+
+      <div
+        tabIndex={0}
+        role="group"
+        aria-label={`${label}, flèches gauche et droite pour parcourir les points`}
+        className="relative mt-5 h-20 cursor-crosshair rounded-[1px] outline-none focus-visible:ring-1 focus-visible:ring-edge"
+        onPointerMove={(event) => {
+          const box = event.currentTarget.getBoundingClientRect()
+          setHover(clamp(Math.round(((event.clientX - box.left) / box.width) * last)))
+        }}
+        onPointerLeave={() => setHover(null)}
+        onBlur={() => setHover(null)}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          setHover(clamp(shown + (event.key === 'ArrowLeft' ? -1 : 1)))
+        }}
+      >
+        <span className="readout absolute left-0 top-0 -translate-y-full pb-1 text-[10px] leading-none text-ink-label">
+          {format(max)}
+        </span>
+        <svg
+          aria-hidden
+          className="absolute inset-0 h-full w-full overflow-visible"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          <line x1="0" x2="100" y1="0" y2="0" stroke="var(--color-edge-soft)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <line x1="0" x2="100" y1="100" y2="100" stroke="var(--color-edge-soft)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <polygon points={`0,100 ${line} 100,100`} fill={color} fillOpacity="0.1" />
+          <polyline
+            points={line}
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        {hover !== null && (
+          <span aria-hidden className="absolute inset-y-0 w-px -translate-x-1/2 bg-edge" style={{ left: `${x(shown)}%` }} />
+        )}
+        <span
+          aria-hidden
+          className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-panel"
+          style={{ left: `${x(shown)}%`, top: `${y(points[shown].value)}%`, background: color }}
+        />
+      </div>
+
+      <div className="readout mt-1.5 flex justify-between text-[10px] text-ink-label">
+        <span>{formatTime(points[0].at)}</span>
+        <span>{formatTime(points[last].at)}</span>
+      </div>
     </div>
   )
 }

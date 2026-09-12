@@ -58,7 +58,6 @@ export interface AccountTrial {
 export interface ServerVitals {
   serverId: string
   displayId: number | null
-  runtimeStatus: string
   connectionAddress: string | null
   expiresAt: string | null
   installedModpack: string | null
@@ -138,12 +137,28 @@ async function resolveHostname(address: string | null): Promise<string | null> {
   }
 }
 
-let vitalsCache: { data: ServerVitals; expiresAt: number } | null = null
+let vitalsCache: { data: ServerVitals; key: string; expiresAt: number } | null = null
 
-export const getServerVitals = createServerFn({ method: 'GET' }).handler(async (): Promise<ServerVitals> => {
+let vitalsInFlight: Promise<{ data: ServerVitals; key: string }> | null = null
+
+/**
+ * Les vitals, et la cle du compte qui porte le serveur vivant. Vitals, stats
+ * et historique la demandent tous au chargement de la page: une seule
+ * releve en vol pour tous, sinon trois balayages des deux comptes partent en
+ * rafale sur le quota que partagent le worker et le bot.
+ */
+async function loadVitals(): Promise<{ data: ServerVitals; key: string }> {
   if (vitalsCache && vitalsCache.expiresAt > Date.now()) {
-    return vitalsCache.data
+    return vitalsCache
   }
+
+  vitalsInFlight ??= fetchVitals().finally(() => {
+    vitalsInFlight = null
+  })
+  return vitalsInFlight
+}
+
+async function fetchVitals(): Promise<{ data: ServerVitals; key: string }> {
 
   const keys = collectApiKeys(process.env)
 
@@ -189,11 +204,8 @@ export const getServerVitals = createServerFn({ method: 'GET' }).handler(async (
     throw new Error('No Minecraft service on these BoxToPlay accounts')
   }
 
-  const key = owners.get(active.id)
-  const [detail, status] = await Promise.all([
-    btpFetch<BtpServiceDetail>(`/services/minecraft/${active.id}`, undefined, REQUEST_TIMEOUT_MS, key),
-    btpFetch<{ runtime_status?: string }>(`/services/minecraft/${active.id}/status`, undefined, REQUEST_TIMEOUT_MS, key),
-  ])
+  const key = owners.get(active.id) ?? keys[0]
+  const detail = await btpFetch<BtpServiceDetail>(`/services/minecraft/${active.id}`, undefined, REQUEST_TIMEOUT_MS, key)
 
   // Chaque compte traine ses essais morts: on ne retient que le vivant le plus
   // tardif, celui que le worker verrait.
@@ -219,7 +231,6 @@ export const getServerVitals = createServerFn({ method: 'GET' }).handler(async (
   const vitals: ServerVitals = {
     serverId: active.id,
     displayId: typeof detail.display_id === 'number' ? detail.display_id : null,
-    runtimeStatus: status.runtime_status ?? 'unknown',
     connectionAddress: await resolveHostname(detail.connection_address ?? null),
     expiresAt: detail.expires_at ?? null,
     installedModpack: detail.installed_modpack?.name ?? null,
@@ -227,6 +238,125 @@ export const getServerVitals = createServerFn({ method: 'GET' }).handler(async (
     fleet,
   }
 
-  vitalsCache = { data: vitals, expiresAt: Date.now() + VITALS_CACHE_TTL_MS }
-  return vitals
+  vitalsCache = { data: vitals, key, expiresAt: Date.now() + VITALS_CACHE_TTL_MS }
+  return vitalsCache
+}
+
+export const getServerVitals = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<ServerVitals> => (await loadVitals()).data,
+)
+
+// https://api.boxtoplay.com/docs#tag/minecraft/GET/services/minecraft/{serverId}/metrics
+interface BtpMetrics {
+  players_online?: number
+  players_max?: number
+  /** cpu_usage_percent deja ramene sur cpu_threads: le chiffre du panel. */
+  display_cpu_usage_percent?: number
+  memory_usage_mb?: number
+  display_memory_limit_mb?: number
+  disk_used_bytes?: number
+}
+
+export interface ServerStats {
+  runtimeStatus: string
+  playersOnline: number
+  playersMax: number
+  players: string[]
+  cpuPercent: number
+  memoryMb: number
+  memoryLimitMb: number
+  diskBytes: number
+}
+
+// L'ecran relit toutes les 10 s, et les cles sont partagees avec le worker et
+// le bot sous le meme quota (120 req / 60 s). Le cache borne la charge a trois
+// requetes par tranche de 10 s, quel que soit le nombre d'onglets ouverts.
+// ponytail: cache par instance serverless, un store partage si le trafic grossit.
+const STATS_CACHE_TTL_MS = 10_000
+let statsCache: { data: ServerStats; expiresAt: number } | null = null
+
+export const getServerStats = createServerFn({ method: 'GET' }).handler(async (): Promise<ServerStats> => {
+  if (statsCache && statsCache.expiresAt > Date.now()) {
+    return statsCache.data
+  }
+
+  const { data: vitals, key } = await loadVitals()
+  const path = `/services/minecraft/${vitals.serverId}`
+  const [status, metrics, online] = await Promise.all([
+    btpFetch<{ runtime_status?: string }>(`${path}/status`, undefined, REQUEST_TIMEOUT_MS, key),
+    // Un serveur arrete ne mesure rien: son etat doit s'afficher quand meme.
+    btpFetch<BtpMetrics>(`${path}/metrics`, undefined, REQUEST_TIMEOUT_MS, key).catch((): BtpMetrics => ({})),
+    btpFetch<{ players?: { name?: string }[] }>(`${path}/players/online`, undefined, REQUEST_TIMEOUT_MS, key).catch(
+      () => ({ players: [] }),
+    ),
+  ])
+
+  const stats: ServerStats = {
+    runtimeStatus: status.runtime_status ?? 'unknown',
+    playersOnline: metrics.players_online ?? 0,
+    playersMax: metrics.players_max ?? 0,
+    players: (online.players ?? []).map((player) => player.name ?? '').filter(Boolean),
+    cpuPercent: metrics.display_cpu_usage_percent ?? 0,
+    memoryMb: metrics.memory_usage_mb ?? 0,
+    memoryLimitMb: metrics.display_memory_limit_mb ?? 0,
+    diskBytes: metrics.disk_used_bytes ?? 0,
+  }
+
+  statsCache = { data: stats, expiresAt: Date.now() + STATS_CACHE_TTL_MS }
+  return stats
+})
+
+// https://api.boxtoplay.com/docs#tag/minecraft/GET/services/minecraft/{serverId}/metrics/history
+interface BtpHistorySample {
+  sampled_at?: string
+  players_peak?: number
+  /** Deja au chiffre du panel: 1 quand /metrics rend 50 brut sur 32 threads. */
+  cpu_usage_percent_average?: number
+  memory_used_bytes_average?: number
+  memory_limit_bytes?: number
+}
+
+export interface HistoryPoint {
+  at: string
+  players: number
+  cpuPercent: number
+  memoryBytes: number
+  memoryLimitBytes: number
+}
+
+// `day` rend un point toutes les 30 min depuis le lancement, soit l'essai
+// entier; `hour` n'en rend que deux. Rien de neuf avant 30 min: 5 min de cache.
+const HISTORY_CACHE_TTL_MS = 5 * 60_000
+let historyCache: { serverId: string; data: HistoryPoint[]; expiresAt: number } | null = null
+
+export const getServerHistory = createServerFn({ method: 'GET' }).handler(async (): Promise<HistoryPoint[]> => {
+  const { data: vitals, key } = await loadVitals()
+
+  if (historyCache && historyCache.serverId === vitals.serverId && historyCache.expiresAt > Date.now()) {
+    return historyCache.data
+  }
+
+  const data = await btpFetch<{ history?: BtpHistorySample[] }>(
+    `/services/minecraft/${vitals.serverId}/metrics/history`,
+    { timeframe: 'day' },
+    REQUEST_TIMEOUT_MS,
+    key,
+  )
+
+  const points = (data.history ?? []).flatMap((sample): HistoryPoint[] =>
+    sample.sampled_at
+      ? [
+          {
+            at: sample.sampled_at,
+            players: sample.players_peak ?? 0,
+            cpuPercent: sample.cpu_usage_percent_average ?? 0,
+            memoryBytes: sample.memory_used_bytes_average ?? 0,
+            memoryLimitBytes: sample.memory_limit_bytes ?? 0,
+          },
+        ]
+      : [],
+  )
+
+  historyCache = { serverId: vitals.serverId, data: points, expiresAt: Date.now() + HISTORY_CACHE_TTL_MS }
+  return points
 })
