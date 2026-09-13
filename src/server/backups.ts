@@ -145,10 +145,13 @@ export const getBackupsList = createServerFn({ method: 'GET' }).handler(async ()
   try {
     const accessToken = await getValidAccessToken()
 
-    // Filter to show only actual Minecraft backups (not random zip files)
-    // Match patterns: minecraft_world_backup.zip, final_backup_*.zip, *-server-files.zip
+    // Filter to show only actual Minecraft backups (not random zip files).
+    // `world_` couvre les rotations horodatees (world_<AAAAMMJJ>_<HHMMSS>Z.zip),
+    // le nom que le worker depose depuis boxtoplay-v2 #29 (2026-09-02);
+    // `minecraft_world_backup` reste pour les archives d'avant ce changement.
+    // Drive filtre large ici, isRotationBackup() tranche ensuite cote client.
     const queryParams = new URLSearchParams({
-      q: "name contains '.zip' and trashed=false and (name contains 'minecraft_world_backup' or name contains 'final_backup' or name contains '-server-files.zip')",
+      q: "name contains '.zip' and trashed=false and (name contains 'world_' or name contains 'minecraft_world_backup' or name contains 'final_backup' or name contains '-server-files.zip')",
       fields: 'files(id, name, size, createdTime, webContentLink)',
       orderBy: 'createdTime desc',
     })
