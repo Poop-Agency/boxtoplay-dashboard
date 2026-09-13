@@ -15,15 +15,15 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Fault, PageHead, Panel, Readout, Well } from '@/components/ui/instrument'
+import { classifyBackups, LEGACY_ROTATION_FILE } from '@/lib/backups'
 import { deleteBackupFile, getBackupsList, getFileRevisions, restoreFullState } from '@/server/backups'
 import type { BackupFile, FileRevision } from '@/server/backups'
 
 export const Route = createFileRoute('/backups')({ component: BackupsPage })
 
-// La sauvegarde de rotation garde toujours le meme nom: le worker la reecrit a
-// chaque passe et Drive en versionne le contenu. Tout le reste est un point de
-// restauration fige.
-const ROTATION_FILE = 'minecraft_world_backup'
+// Chaque rotation depose desormais son propre fichier horodate (purge a 7
+// jours). Les revisions Drive ne servent plus qu'aux archives d'avant le
+// 2026-09-02, quand un seul fichier etait reecrit sur place.
 
 function formatBytes(bytes: string | number): string {
   const value = typeof bytes === 'string' ? Number.parseInt(bytes, 10) : bytes
@@ -91,15 +91,10 @@ function BackupsPage() {
     },
   })
 
-  const { rotation, restorePoints } = useMemo(() => {
-    const all = backups.data ?? []
-    const isRotation = (file: BackupFile) => file.name.toLowerCase().includes(ROTATION_FILE)
-
-    return {
-      rotation: all.find(isRotation),
-      restorePoints: all.filter((file) => file.isFinal && !isRotation(file)),
-    }
-  }, [backups.data])
+  const { rotations, restorePoints } = useMemo(
+    () => classifyBackups(backups.data ?? []),
+    [backups.data],
+  )
 
   const stats = useMemo(() => {
     const all = backups.data ?? []
@@ -130,7 +125,7 @@ function BackupsPage() {
 
       <PageHead
         title="Sauvegardes"
-        note="Archives du monde sur Google Drive. Une sauvegarde continue réécrite à chaque rotation, et les points de restauration figés."
+        note="Archives du monde sur Google Drive. Une archive par rotation, gardée 7 jours, et les points de restauration figés."
       />
 
       <Panel title="Stock">
@@ -144,29 +139,41 @@ function BackupsPage() {
         </div>
       </Panel>
 
-      {rotation && (
+      {rotations.length > 0 && (
         <Panel
-          title="Rotation continue"
-          note="Réécrite à chaque passe du worker. Drive en garde l'historique."
+          title="Rotations"
+          note="Une archive par rotation, la plus récente en tête. Drive les purge au bout de 7 jours."
         >
-          <div className="flex flex-col gap-4 p-4 sm:p-5 md:flex-row md:items-end md:justify-between">
-            <div className="min-w-0">
-              <p className="readout truncate text-[15px] text-ink">{rotation.name}</p>
-              <p className="readout mt-1.5 text-xs text-ink-dim">
-                {formatDate(rotation.createdTime)} · {formatBytes(rotation.size)}
-              </p>
-            </div>
+          <ul className="divide-y divide-edge-soft">
+            {rotations.map((backup, index) => (
+              <li
+                key={backup.id}
+                className="arrive flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+                style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}
+              >
+                <div className="min-w-0">
+                  <p className="readout truncate text-[15px] text-ink">{backup.name}</p>
+                  <p className="readout mt-1 text-xs text-ink-dim">
+                    {formatDate(backup.createdTime)} · {formatBytes(backup.size)}
+                  </p>
+                </div>
 
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <Control onClick={() => setVersionTarget(rotation)}>Versions</Control>
-              {rotation.webContentLink && (
-                <ControlLink href={rotation.webContentLink}>Télécharger</ControlLink>
-              )}
-              <Control tone="fault" onClick={() => setDeleteTarget(rotation)}>
-                Supprimer
-              </Control>
-            </div>
-          </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {/* Revisions: seules les archives d'avant le 2026-09-02 en ont,
+                      elles etaient reecrites sur place. */}
+                  {backup.name.toLowerCase().includes(LEGACY_ROTATION_FILE) && (
+                    <Control onClick={() => setVersionTarget(backup)}>Versions</Control>
+                  )}
+                  {backup.webContentLink && (
+                    <ControlLink href={backup.webContentLink}>Télécharger</ControlLink>
+                  )}
+                  <Control tone="fault" onClick={() => setDeleteTarget(backup)}>
+                    Supprimer
+                  </Control>
+                </div>
+              </li>
+            ))}
+          </ul>
         </Panel>
       )}
 
