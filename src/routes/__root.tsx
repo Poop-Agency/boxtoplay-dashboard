@@ -1,4 +1,4 @@
-import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Outlet, Scripts, createRootRoute, useRouterState } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TanStackDevtools } from '@tanstack/react-devtools'
@@ -58,6 +58,16 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 }
 
 function RootLayout() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+
+  if (pathname === '/login') {
+    return (
+      <main className="min-h-screen p-4">
+        <Outlet />
+      </main>
+    )
+  }
+
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <AppSidebar />

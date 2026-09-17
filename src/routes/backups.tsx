@@ -18,8 +18,9 @@ import { Fault, PageHead, Panel, Readout, Well } from '@/components/ui/instrumen
 import { classifyBackups, LEGACY_ROTATION_FILE } from '@/lib/backups'
 import { deleteBackupFile, getBackupsList, getFileRevisions, restoreFullState } from '@/server/backups'
 import type { BackupFile, FileRevision } from '@/server/backups'
+import { requireSession } from '@/server/session'
 
-export const Route = createFileRoute('/backups')({ component: BackupsPage })
+export const Route = createFileRoute('/backups')({ beforeLoad: requireSession, component: BackupsPage })
 
 // Chaque rotation depose desormais son propre fichier horodate (purge a 7
 // jours). Les revisions Drive ne servent plus qu'aux archives d'avant le

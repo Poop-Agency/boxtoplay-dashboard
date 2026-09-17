@@ -10,12 +10,20 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ModpacksRouteImport } from './routes/modpacks'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as BackupsRouteImport } from './routes/backups'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiLogoutRouteImport } from './routes/api/logout'
+import { Route as ApiLoginRouteImport } from './routes/api/login'
 
 const ModpacksRoute = ModpacksRouteImport.update({
   id: '/modpacks',
   path: '/modpacks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BackupsRoute = BackupsRouteImport.update({
@@ -28,35 +36,70 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiLogoutRoute = ApiLogoutRouteImport.update({
+  id: '/api/logout',
+  path: '/api/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLoginRoute = ApiLoginRouteImport.update({
+  id: '/api/login',
+  path: '/api/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/backups': typeof BackupsRoute
+  '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
+  '/api/login': typeof ApiLoginRoute
+  '/api/logout': typeof ApiLogoutRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/backups': typeof BackupsRoute
+  '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
+  '/api/login': typeof ApiLoginRoute
+  '/api/logout': typeof ApiLogoutRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/backups': typeof BackupsRoute
+  '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
+  '/api/login': typeof ApiLoginRoute
+  '/api/logout': typeof ApiLogoutRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/backups' | '/modpacks'
+  fullPaths:
+    | '/'
+    | '/backups'
+    | '/login'
+    | '/modpacks'
+    | '/api/login'
+    | '/api/logout'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/backups' | '/modpacks'
-  id: '__root__' | '/' | '/backups' | '/modpacks'
+  to: '/' | '/backups' | '/login' | '/modpacks' | '/api/login' | '/api/logout'
+  id:
+    | '__root__'
+    | '/'
+    | '/backups'
+    | '/login'
+    | '/modpacks'
+    | '/api/login'
+    | '/api/logout'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BackupsRoute: typeof BackupsRoute
+  LoginRoute: typeof LoginRoute
   ModpacksRoute: typeof ModpacksRoute
+  ApiLoginRoute: typeof ApiLoginRoute
+  ApiLogoutRoute: typeof ApiLogoutRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -66,6 +109,13 @@ declare module '@tanstack/react-router' {
       path: '/modpacks'
       fullPath: '/modpacks'
       preLoaderRoute: typeof ModpacksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/backups': {
@@ -82,23 +132,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/logout': {
+      id: '/api/logout'
+      path: '/api/logout'
+      fullPath: '/api/logout'
+      preLoaderRoute: typeof ApiLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/login': {
+      id: '/api/login'
+      path: '/api/login'
+      fullPath: '/api/login'
+      preLoaderRoute: typeof ApiLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BackupsRoute: BackupsRoute,
+  LoginRoute: LoginRoute,
   ModpacksRoute: ModpacksRoute,
+  ApiLoginRoute: ApiLoginRoute,
+  ApiLogoutRoute: ApiLogoutRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
+import type { startInstance } from './start.ts'
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
     router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }
