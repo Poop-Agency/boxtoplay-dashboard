@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { Fault, Gauge, Lamp, PageHead, Panel, Readout, State, Well } from '@/components/ui/instrument'
+import { Fault, Gauge, Lamp, Panel, State, Well } from '@/components/ui/instrument'
 import {
   formatDisk,
   formatMemory,
@@ -60,22 +60,19 @@ function DashboardPage() {
   })
 
   return (
-    <div className="space-y-5">
-      <PageHead
-        title="Tableau de bord"
-        note="Le serveur migre seul entre deux comptes toutes les huit heures. Cet écran lit son état, il n'agit pas dessus."
-      />
+    // Tient sur un ecran 1080p: pas d'en-tete de page (la sidebar le dit), et
+    // aucune valeur affichee deux fois.
+    <div className="space-y-4">
+      <h1 className="sr-only">Tableau de bord</h1>
 
       <StatusBanner stats={stats} vitals={vitals} />
 
       <HistoryPanel history={history} />
 
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
-        <PanelVitals vitals={vitals} />
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <RotationPanel rotation={rotation} vitals={vitals} />
+        <RunLog runs={runs} />
       </div>
-
-      <RunLog runs={runs} />
     </div>
   )
 }
@@ -107,7 +104,7 @@ function StatusBanner({
 
   return (
     <section className="panel arrive overflow-hidden">
-      <div className="flex flex-col gap-5 px-4 py-5 sm:px-6 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-4">
           <Lamp signal={signal} className="h-3.5 w-3.5" />
           <div>
@@ -138,35 +135,32 @@ function StatusBanner({
             signal={trialSignal(expiresAt)}
             ticks={[1 / 6]}
           />
+          {expiresAt && <p className="readout mt-1.5 text-right text-[11px] text-ink-label">expire {formatShort(expiresAt)}</p>}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-3 lg:grid-cols-6">
         <Cell label="Serveur" value={vitals.data?.displayId ? `#${vitals.data.displayId}` : '—'} />
         <Cell label="Modpack" value={vitals.data?.installedModpack ?? '—'} />
         <Cell label="Joueurs" value={online ? `${players} / ${slots}` : '—'}>
           {online && slots > 0 && (
             <Gauge
-              className="mt-2.5"
+              className="mt-2"
               label="Places occupées"
               value={players / slots}
               signal={players > 0 ? 'live' : 'idle'}
             />
           )}
         </Cell>
-        <Cell label="État panel" value={stats.data?.runtimeStatus ?? '—'} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-px border-t border-edge-soft bg-edge-soft sm:grid-cols-3">
         <Cell label="CPU" value={online ? `${cpu} %` : '—'}>
           {online && (
-            <Gauge className="mt-2.5" label="Charge CPU" value={Math.min(1, cpu / 100)} signal={loadSignal(cpu / 100)} />
+            <Gauge className="mt-2" label="Charge CPU" value={Math.min(1, cpu / 100)} signal={loadSignal(cpu / 100)} />
           )}
         </Cell>
         <Cell label="Mémoire" value={online ? formatMemory(memory, memoryLimit) : '—'}>
           {online && memoryLimit > 0 && (
             <Gauge
-              className="mt-2.5"
+              className="mt-2"
               label="Mémoire utilisée"
               value={Math.min(1, memory / memoryLimit)}
               signal={loadSignal(memory / memoryLimit)}
@@ -196,7 +190,7 @@ function Cell({
   children?: React.ReactNode
 }) {
   return (
-    <div className="bg-panel px-4 py-3.5 sm:px-5">
+    <div className="bg-panel px-4 py-3 sm:px-5">
       <p className="engraved">{label}</p>
       <p className="readout mt-2 truncate text-sm text-ink" title={value}>
         {value}
@@ -207,52 +201,6 @@ function Cell({
 }
 
 // -----------------------------------------------------------------------------
-
-function PanelVitals({
-  vitals,
-}: {
-  vitals: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerVitals>>>>
-}) {
-  return (
-    <Panel title="Panel BoxToPlay" note="Source faisant foi · relu toutes les 60 s">
-      <div className="p-4 sm:p-5">
-        {vitals.isPending ? (
-          <LoadingGrid />
-        ) : vitals.isError ? (
-          <Fault>
-            L'API BoxToPlay a refusé la requête ou n'est pas joignable. Vérifier
-            <span className="readout"> BTP_API_KEY_0</span> et
-            <span className="readout"> BTP_API_KEY_1</span> dans l'environnement Vercel.
-          </Fault>
-        ) : (
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <Readout label="Connexion" value={vitals.data.connectionAddress ?? '—'} />
-            <Readout
-              label="Expire à"
-              value={
-                vitals.data.expiresAt
-                  ? new Date(vitals.data.expiresAt).toLocaleString('fr-FR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  : '—'
-              }
-              signal={trialSignal(vitals.data.expiresAt)}
-            />
-            <Readout
-              label="Modpack installé"
-              value={vitals.data.installedModpack ?? '—'}
-              title={vitals.data.installedModpack ?? undefined}
-              className="sm:col-span-2"
-            />
-          </div>
-        )}
-      </div>
-    </Panel>
-  )
-}
 
 // -----------------------------------------------------------------------------
 
@@ -279,61 +227,38 @@ function RotationPanel({
           </Fault>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              <Readout label="Compte actif" value={rotation.data.activeAccountEmail} />
-              <Readout label="Serveur" value={rotation.data.activeServerId} />
-              <Readout label="Modpack" value={rotation.data.modpackName} />
-              <Readout label="Référence" value={rotation.data.modpackRef} />
-            </div>
-
-            <div className="mt-4 border-t border-edge-soft pt-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                <span className="engraved">Dernière</span>
+            <dl className="space-y-2">
+              <Row label="Compte actif">
+                <span className="readout text-sm text-ink">{rotation.data.activeAccountEmail}</span>
+              </Row>
+              <Row label="Dernière">
                 <span className="readout text-sm text-ink">
-                  {rotation.data.lastRotationAt
-                    ? new Date(rotation.data.lastRotationAt).toLocaleString('fr-FR', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    : '—'}
+                  {rotation.data.lastRotationAt ? formatShort(rotation.data.lastRotationAt) : '—'}
                 </span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                <span className="engraved">Prochaine au plus tôt</span>
-                <span className="readout text-sm text-ink-dim">
-                  {next
-                    ? next.toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    : '—'}
+              </Row>
+              {/* Le cron GitHub tire souvent en retard, jusqu'a quatre heures
+                  observees: cette heure est un plancher, pas une promesse. */}
+              <Row label="Prochaine au plus tôt">
+                <span className="readout text-sm text-ink-dim" title="Le cron GitHub peut partir jusqu'à ~4 h en retard">
+                  {next ? next.toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}
                 </span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                <span className="engraved">Ce que fera ce créneau</span>
+              </Row>
+              <Row label="Ce créneau">
                 <span className="flex items-center gap-2 text-sm text-ink">
                   <Lamp signal={outlookSignal(outlook.verdict)} />
                   {formatOutlook(outlook)}
                 </span>
-              </div>
-              <p className="mt-3 max-w-[68ch] text-xs text-ink-label">
-                Le cron GitHub tire souvent en retard, jusqu'à quatre heures observées. Cette
-                heure est un plancher, pas une promesse — et un retard décale la prévision
-                ci-dessus dans le sens de la rotation.
-              </p>
-            </div>
+              </Row>
+            </dl>
 
             {fleet.length > 0 && (
               <div className="mt-4 border-t border-edge-soft pt-4">
                 <p className="engraved">Les deux comptes</p>
-                <div className="mt-3 space-y-2.5">
+                <div className="mt-2.5 space-y-2">
                   {fleet.map((account) => (
                     <AccountRow key={account.index} account={account} />
                   ))}
                 </div>
-                <p className="mt-3 max-w-[68ch] text-xs text-ink-label">
-                  La relève n'est possible que si le compte cible porte un essai vivant, ou
-                  peut en racheter un. Deux comptes à sec, et le monde n'a plus où aller.
-                </p>
               </div>
             )}
           </>
@@ -351,7 +276,7 @@ function RunLog({
   runs: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getRecentWorkflows>>>>
 }) {
   return (
-    <Panel title="Journal" note="Derniers déclenchements GitHub Actions">
+    <Panel title="Journal" note="5 derniers déclenchements GitHub Actions">
       <div className="p-4 sm:p-5">
         {runs.isPending ? (
           <div className="space-y-2">
@@ -377,18 +302,13 @@ function RunLog({
               </tr>
             </thead>
             <tbody>
-              {runs.data.map((run) => (
+              {runs.data.slice(0, 5).map((run) => (
                 <tr key={run.id} className="border-b border-edge-soft/60 last:border-0">
                   <td data-label="Déclenchement" className="py-2.5 pr-4 text-sm text-ink">
                     {run.name}
                   </td>
                   <td data-label="Date" className="readout py-2.5 pr-4 text-xs text-ink-dim">
-                    {new Date(run.createdAt).toLocaleString('fr-FR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {formatShort(run.createdAt)}
                   </td>
                   <td data-label="État" className="py-2.5 pr-4">
                     <State signal={workflowSignal(run.status, run.conclusion)}>
@@ -422,7 +342,7 @@ function AccountRow({
   account: { index: number; displayId: number | null; expiresAt: string | null; isLive: boolean }
 }) {
   return (
-    <div className="recess flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[2px] px-3 py-2.5">
+    <div className="recess flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[2px] px-3 py-2">
       <Lamp signal={account.isLive ? 'live' : account.expiresAt ? 'idle' : 'fault'} />
       <span className="readout text-[13px] text-ink">
         compte {account.index}
@@ -464,7 +384,7 @@ function HistoryPanel({
         {history.isPending ? (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             {[0, 1, 2].map((i) => (
-              <Well key={i} className="h-[124px] w-full" />
+              <Well key={i} className="h-[92px] w-full" />
             ))}
           </div>
         ) : history.isError ? (
@@ -499,7 +419,7 @@ function HistoryPanel({
               />
             </div>
 
-            <details className="mt-5 border-t border-edge-soft pt-3">
+            <details className="mt-3 border-t border-edge-soft pt-2.5">
               <summary className="engraved cursor-pointer">Valeurs</summary>
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full text-left">
@@ -582,7 +502,7 @@ function HistoryChart({
         tabIndex={0}
         role="group"
         aria-label={`${label}, flèches gauche et droite pour parcourir les points`}
-        className="relative mt-5 h-20 cursor-crosshair rounded-[1px] outline-none focus-visible:ring-1 focus-visible:ring-edge"
+        className="relative mt-4 h-12 cursor-crosshair rounded-[1px] outline-none focus-visible:ring-1 focus-visible:ring-edge"
         onPointerMove={(event) => {
           const box = event.currentTarget.getBoundingClientRect()
           setHover(clamp(Math.round(((event.clientX - box.left) / box.width) * last)))
@@ -631,6 +551,18 @@ function HistoryChart({
         <span>{formatTime(points[0].at)}</span>
         <span>{formatTime(points[last].at)}</span>
       </div>
+    </div>
+  )
+}
+
+const formatShort = (at: string) =>
+  new Date(at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+      <dt className="engraved">{label}</dt>
+      <dd className="min-w-0 truncate">{children}</dd>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { classifyBackups, isRotationBackup } from './backups'
+import { classifyBackups, groupByDay, isBackupStale, isRotationBackup } from './backups'
 
 const file = (name: string, createdTime: string, isFinal = false) => ({
   name,
@@ -62,5 +62,35 @@ describe('classifyBackups', () => {
 
     expect(rotations).toHaveLength(1)
     expect(restorePoints).toHaveLength(0)
+  })
+})
+
+describe('groupByDay', () => {
+  it('groupe par jour de Paris, jours recents en tete', () => {
+    const days = groupByDay([
+      file('world_20260912_114551Z.zip', '2026-09-12T11:45:51Z'),
+      file('world_20260912_011813Z.zip', '2026-09-12T01:18:13Z'),
+      // 23h30 UTC le 11 = 01h30 le 12 a Paris
+      file('world_20260911_233000Z.zip', '2026-09-11T23:30:00Z'),
+      file('world_20260911_113041Z.zip', '2026-09-11T11:30:41Z'),
+    ])
+
+    expect(days.map((d) => [d.day, d.files.length])).toEqual([
+      ['2026-09-12', 3],
+      ['2026-09-11', 1],
+    ])
+  })
+})
+
+describe('isBackupStale', () => {
+  const now = Date.parse('2026-09-17T12:00:00Z')
+
+  it('signale une derniere archive trop vieille ou absente', () => {
+    expect(isBackupStale('2026-09-12T11:45:51Z', now)).toBe(true)
+    expect(isBackupStale(undefined, now)).toBe(true)
+  })
+
+  it('accepte une archive de la derniere rotation, meme en retard', () => {
+    expect(isBackupStale('2026-09-17T01:30:00Z', now)).toBe(false)
   })
 })
