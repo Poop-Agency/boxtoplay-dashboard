@@ -41,3 +41,33 @@ export function classifyBackups<T extends Sortable>(files: T[]): {
     restorePoints: files.filter((file) => file.isFinal && !isRotationBackup(file.name)),
   }
 }
+
+/** Jour calendaire a Paris, `AAAA-MM-JJ`: les rotations de 01h UTC tombent le bon jour. */
+export const parisDay = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' })
+
+/**
+ * Regroupe les rotations par jour, du plus recent au plus ancien. 7 jours de
+ * retention a ~3 rotations par jour faisaient une liste de 21 lignes.
+ */
+export function groupByDay<T extends Sortable>(rotations: T[]): { day: string; files: T[] }[] {
+  const days = new Map<string, T[]>()
+  for (const file of rotations) {
+    const day = parisDay(file.createdTime)
+    days.set(day, [...(days.get(day) ?? []), file])
+  }
+  return [...days.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([day, files]) => ({ day, files }))
+}
+
+// Une rotation toutes les 8 h, et le cron GitHub derive jusqu'a ~5 h.
+export const STALE_BACKUP_HOURS = 14
+
+/**
+ * Vrai si la derniere archive de rotation a plus de STALE_BACKUP_HOURS. Du
+ * 2026-09-12 au 17 plus rien n'arrivait sur Drive et les runs restaient verts:
+ * seule la date de la derniere archive le montrait.
+ */
+export const isBackupStale = (latestIso: string | undefined, now = Date.now()) =>
+  !latestIso || now - new Date(latestIso).getTime() > STALE_BACKUP_HOURS * 3600_000

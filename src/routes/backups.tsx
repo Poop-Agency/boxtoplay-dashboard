@@ -14,8 +14,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Fault, PageHead, Panel, Readout, Well } from '@/components/ui/instrument'
-import { classifyBackups, LEGACY_ROTATION_FILE } from '@/lib/backups'
+import { Fault, PageHead, Panel, Well } from '@/components/ui/instrument'
+import { classifyBackups, groupByDay, isBackupStale, LEGACY_ROTATION_FILE } from '@/lib/backups'
 import { deleteBackupFile, getBackupsList, getFileRevisions, restoreFullState } from '@/server/backups'
 import type { BackupFile, FileRevision } from '@/server/backups'
 import { requireSession } from '@/server/session'
@@ -46,7 +46,6 @@ function formatDate(iso: string): string {
 
 function BackupsPage() {
   const queryClient = useQueryClient()
-  const [search, setSearch] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<BackupFile | null>(null)
   const [restoreTarget, setRestoreTarget] = useState<BackupFile | null>(null)
   const [versionTarget, setVersionTarget] = useState<BackupFile | null>(null)
@@ -97,28 +96,11 @@ function BackupsPage() {
     [backups.data],
   )
 
-  const stats = useMemo(() => {
-    const all = backups.data ?? []
-    const bytes = all.reduce((sum, file) => sum + (Number.parseInt(file.size, 10) || 0), 0)
-    const latest = all.reduce<string | null>(
-      (newest, file) =>
-        !newest || new Date(file.createdTime) > new Date(newest) ? file.createdTime : newest,
-      null,
-    )
-
-    return { count: all.length, bytes, latest }
-  }, [backups.data])
-
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    if (!needle) return restorePoints
-
-    return restorePoints.filter(
-      (file) =>
-        file.name.toLowerCase().includes(needle) ||
-        file.associatedModpack.toLowerCase().includes(needle),
-    )
-  }, [restorePoints, search])
+  const days = useMemo(() => groupByDay(rotations), [rotations])
+  const [pickedDay, setPickedDay] = useState<string | null>(null)
+  const shownDay = days.find((d) => d.day === pickedDay) ?? days[0]
+  const latest = rotations[0]?.createdTime
+  const totalBytes = rotations.reduce((sum, file) => sum + (Number.parseInt(file.size, 10) || 0), 0)
 
   return (
     <div className="space-y-5">
@@ -126,76 +108,21 @@ function BackupsPage() {
 
       <PageHead
         title="Sauvegardes"
-        note="Archives du monde sur Google Drive. Une archive par rotation, gardée 7 jours, et les points de restauration figés."
+        note="Archives du monde sur Google Drive: une par rotation, gardée 7 jours, et les points de restauration figés."
       />
 
-      <Panel title="Stock">
-        <div className="grid grid-cols-1 gap-2.5 p-4 sm:grid-cols-3 sm:p-5">
-          <Readout label="Archives" value={backups.isPending ? '…' : String(stats.count)} />
-          <Readout label="Poids total" value={backups.isPending ? '…' : formatBytes(stats.bytes)} />
-          <Readout
-            label="Dernière écriture"
-            value={backups.isPending ? '…' : stats.latest ? formatDate(stats.latest) : '—'}
-          />
-        </div>
-      </Panel>
-
-      {rotations.length > 0 && (
-        <Panel
-          title="Rotations"
-          note="Une archive par rotation, la plus récente en tête. Drive les purge au bout de 7 jours."
-        >
-          <ul className="divide-y divide-edge-soft">
-            {rotations.map((backup, index) => (
-              <li
-                key={backup.id}
-                className="arrive flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5"
-                style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}
-              >
-                <div className="min-w-0">
-                  <p className="readout truncate text-[15px] text-ink">{backup.name}</p>
-                  <p className="readout mt-1 text-xs text-ink-dim">
-                    {formatDate(backup.createdTime)} · {formatBytes(backup.size)}
-                  </p>
-                </div>
-
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {/* Revisions: seules les archives d'avant le 2026-09-02 en ont,
-                      elles etaient reecrites sur place. */}
-                  {backup.name.toLowerCase().includes(LEGACY_ROTATION_FILE) && (
-                    <Control onClick={() => setVersionTarget(backup)}>Versions</Control>
-                  )}
-                  {backup.webContentLink && (
-                    <ControlLink href={backup.webContentLink}>Télécharger</ControlLink>
-                  )}
-                  <Control tone="fault" onClick={() => setDeleteTarget(backup)}>
-                    Supprimer
-                  </Control>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
-
       <Panel
-        title="Points de restauration"
-        note="Un état complet: monde, modpack et configuration."
-        aside={
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Filtrer"
-            aria-label="Filtrer les points de restauration"
-            className="recess w-40 rounded-[2px] px-3 py-1.5 text-sm text-ink placeholder:text-ink-label focus:outline-none"
-          />
+        title="Rotations"
+        note={
+          backups.isSuccess
+            ? `${rotations.length} archives · ${formatBytes(totalBytes)} · purge Drive à 7 jours`
+            : 'Une archive par rotation, purge Drive à 7 jours'
         }
       >
         {backups.isPending ? (
           <div className="space-y-2 p-4 sm:p-5">
             {[0, 1, 2].map((i) => (
-              <Well key={i} className="h-14 w-full" />
+              <Well key={i} className="h-12 w-full" />
             ))}
           </div>
         ) : backups.isError ? (
@@ -204,26 +131,99 @@ function BackupsPage() {
               Google Drive n'a pas répondu. Vérifier <span className="readout">RCLONE_CONFIG_GDRIVE</span>.
             </Fault>
           </div>
-        ) : filtered.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-ink-dim sm:px-5">
-            {search.trim() ? 'Aucune archive ne correspond.' : 'Aucun point de restauration enregistré.'}
-          </p>
+        ) : (
+          <>
+            {isBackupStale(latest) && (
+              <div className="border-b border-edge-soft px-4 py-3 sm:px-5">
+                <Fault>
+                  {latest
+                    ? `Aucune archive depuis le ${formatDate(latest)}. Les rotations continuent peut-être sans sauvegarde : vérifier le step « Export backup » du dernier run.`
+                    : 'Aucune archive de rotation sur Drive.'}
+                </Fault>
+              </div>
+            )}
+
+            {days.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 border-b border-edge-soft px-4 py-3 sm:px-5" role="tablist">
+                {days.map(({ day, files }) => {
+                  const active = day === shownDay?.day
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setPickedDay(day)}
+                      className={`rounded-[2px] px-3 py-1.5 text-xs transition-colors duration-150 ${
+                        active ? 'raise font-medium text-ink' : 'text-ink-dim hover:bg-raised/40 hover:text-ink'
+                      }`}
+                    >
+                      {new Date(`${day}T12:00:00`).toLocaleDateString('fr-FR', {
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: '2-digit',
+                      })}
+                      <span className="readout ml-1.5 text-ink-label">{files.length}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <ul className="divide-y divide-edge-soft">
+              {shownDay?.files.map((backup) => (
+                <li
+                  key={backup.id}
+                  className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+                >
+                  <p className="readout text-sm text-ink">
+                    {new Date(backup.createdTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    <span className="ml-3 text-xs text-ink-dim">{formatBytes(backup.size)}</span>
+                    <span className="ml-3 hidden text-xs text-ink-label sm:inline">{backup.name}</span>
+                  </p>
+
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {/* Revisions: seules les archives d'avant le 2026-09-02 en ont,
+                        elles etaient reecrites sur place. */}
+                    {backup.name.toLowerCase().includes(LEGACY_ROTATION_FILE) && (
+                      <Control onClick={() => setVersionTarget(backup)}>Versions</Control>
+                    )}
+                    {backup.webContentLink && (
+                      <ControlLink href={backup.webContentLink}>Télécharger</ControlLink>
+                    )}
+                    <Control tone="fault" onClick={() => setDeleteTarget(backup)}>
+                      Supprimer
+                    </Control>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </Panel>
+
+      <Panel title="Points de restauration" note="Un état complet: monde, modpack et configuration.">
+        {backups.isPending ? (
+          <div className="space-y-2 p-4 sm:p-5">
+            {[0, 1, 2].map((i) => (
+              <Well key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : backups.isError ? null : restorePoints.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-ink-dim sm:px-5">Aucun point de restauration enregistré.</p>
         ) : (
           <ul className="divide-y divide-edge-soft">
-            {filtered.map((backup, index) => (
+            {restorePoints.map((backup) => (
               <li
                 key={backup.id}
-                className="arrive flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5"
-                style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}
+                className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-5"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-[15px] font-medium text-ink">
-                    {backup.associatedModpack || backup.name.replace(/\.zip$/, '')}
-                  </p>
-                  <p className="readout mt-1 text-xs text-ink-dim">
+                <p className="min-w-0 truncate text-sm text-ink">
+                  <span className="font-medium">{backup.associatedModpack || backup.name.replace(/\.zip$/, '')}</span>
+                  <span className="readout ml-3 text-xs text-ink-dim">
                     {formatDate(backup.createdTime)} · {formatBytes(backup.size)}
-                  </p>
-                </div>
+                  </span>
+                </p>
 
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Control
