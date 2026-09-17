@@ -1,7 +1,10 @@
 'use client'
 
 import { Link, useRouterState } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+
+import { hasSession } from '@/server/session'
 
 const navItems = [
   { to: '/', label: 'Tableau de bord' },
@@ -14,6 +17,7 @@ const navItems = [
 export function AppSidebar() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const [open, setOpen] = useState(false)
+  const session = useQuery({ queryKey: ['session'], queryFn: () => hasSession() })
 
   return (
     <>
@@ -66,8 +70,19 @@ export function AppSidebar() {
           })}
         </nav>
 
-        <div className="border-t border-edge-soft px-4 py-4">
+        <div className="flex items-center justify-between gap-2 border-t border-edge-soft px-4 py-4">
           <p className="readout text-[11px] text-ink-label">v2 · rotation 8 h</p>
+          {session.data ? (
+            <form method="post" action="/api/logout">
+              <button type="submit" className="text-xs text-ink-dim underline-offset-4 hover:text-ink hover:underline">
+                Déconnexion
+              </button>
+            </form>
+          ) : (
+            <Link to="/login" className="text-xs text-ink-dim underline-offset-4 hover:text-ink hover:underline">
+              Connexion
+            </Link>
+          )}
         </div>
       </aside>
     </>

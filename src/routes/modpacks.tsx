@@ -5,8 +5,10 @@ import * as React from 'react'
 import { Fault, Lamp, PageHead, Panel, Well } from '@/components/ui/instrument'
 import { defaultVersionId, formatDownloads, splitGameVersion } from '@/lib/modpacks'
 import { getModpackVersions, searchModpacks, triggerModpackSwitch } from '@/server/modpacks'
+import { requireSession } from '@/server/session'
 
 export const Route = createFileRoute('/modpacks')({
+  beforeLoad: requireSession,
   component: ModpacksPage,
 })
 
