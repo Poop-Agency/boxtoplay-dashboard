@@ -13,7 +13,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Lamp, PageHead, Panel } from '@/components/ui/instrument'
-import { MAX_COMMAND_LENGTH, commandError, destructiveVerb, normalizeCommand } from '@/lib/console'
+import {
+  MAX_COMMAND_LENGTH,
+  commandError,
+  destructiveVerb,
+  failureMessage,
+  normalizeCommand,
+} from '@/lib/console'
 import { sendConsoleCommand } from '@/server/console'
 import { requireSession } from '@/server/session'
 
@@ -60,7 +66,7 @@ function ConsolePage() {
       )
     },
     onError: (error, _command, context) => {
-      const message = error instanceof Error ? error.message : 'Commande refusée'
+      const message = failureMessage(error instanceof Error ? error.message : 'Commande refusée')
       setEntries((list) =>
         list.map((entry) => (entry.id === context?.id ? { ...entry, error: message } : entry)),
       )

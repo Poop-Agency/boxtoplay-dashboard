@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { MAX_COMMAND_LENGTH, commandError, destructiveVerb, normalizeCommand } from './console'
+import {
+  MAX_COMMAND_LENGTH,
+  commandError,
+  destructiveVerb,
+  failureMessage,
+  normalizeCommand,
+} from './console'
 
 describe('normalizeCommand', () => {
   it('retire le slash du chat et les espaces', () => {
@@ -35,5 +41,22 @@ describe('destructiveVerb', () => {
     expect(destructiveVerb('time set day')).toBeNull()
     // Le verbe compte, pas le texte: `say stop` ne coupe rien.
     expect(destructiveVerb('say stop')).toBeNull()
+  })
+})
+
+describe('failureMessage', () => {
+  it('traduit une erreur de l’API en cause probable', () => {
+    expect(
+      failureMessage('BoxToPlay API /services/minecraft/btp_x/console/commands failed: 409'),
+    ).toBe('BoxToPlay refuse la commande (409). Serveur éteint ou en rotation ?')
+  })
+
+  it('traduit le refus illisible d’une server function', () => {
+    // Le middleware repousse l’appel, mais le framework rend ceci au client.
+    expect(failureMessage('Seroval Error (step: 3)')).toContain('session expirée')
+  })
+
+  it('laisse passer un message déjà clair', () => {
+    expect(failureMessage('Commande vide.')).toBe('Commande vide.')
   })
 })
