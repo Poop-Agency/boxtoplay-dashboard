@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ModpacksRouteImport } from './routes/modpacks'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ConsoleRouteImport } from './routes/console'
 import { Route as BackupsRouteImport } from './routes/backups'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
@@ -24,6 +25,11 @@ const ModpacksRoute = ModpacksRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConsoleRoute = ConsoleRouteImport.update({
+  id: '/console',
+  path: '/console',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BackupsRoute = BackupsRouteImport.update({
@@ -50,6 +56,7 @@ const ApiLoginRoute = ApiLoginRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/backups': typeof BackupsRoute
+  '/console': typeof ConsoleRoute
   '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
   '/api/login': typeof ApiLoginRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/backups': typeof BackupsRoute
+  '/console': typeof ConsoleRoute
   '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
   '/api/login': typeof ApiLoginRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/backups': typeof BackupsRoute
+  '/console': typeof ConsoleRoute
   '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
   '/api/login': typeof ApiLoginRoute
@@ -77,16 +86,25 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/backups'
+    | '/console'
     | '/login'
     | '/modpacks'
     | '/api/login'
     | '/api/logout'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/backups' | '/login' | '/modpacks' | '/api/login' | '/api/logout'
+  to:
+    | '/'
+    | '/backups'
+    | '/console'
+    | '/login'
+    | '/modpacks'
+    | '/api/login'
+    | '/api/logout'
   id:
     | '__root__'
     | '/'
     | '/backups'
+    | '/console'
     | '/login'
     | '/modpacks'
     | '/api/login'
@@ -96,6 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BackupsRoute: typeof BackupsRoute
+  ConsoleRoute: typeof ConsoleRoute
   LoginRoute: typeof LoginRoute
   ModpacksRoute: typeof ModpacksRoute
   ApiLoginRoute: typeof ApiLoginRoute
@@ -116,6 +135,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/console': {
+      id: '/console'
+      path: '/console'
+      fullPath: '/console'
+      preLoaderRoute: typeof ConsoleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/backups': {
@@ -152,6 +178,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BackupsRoute: BackupsRoute,
+  ConsoleRoute: ConsoleRoute,
   LoginRoute: LoginRoute,
   ModpacksRoute: ModpacksRoute,
   ApiLoginRoute: ApiLoginRoute,

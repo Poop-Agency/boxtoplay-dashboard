@@ -70,6 +70,8 @@ export const btpFetch = async <T>(
   params?: Record<string, string>,
   timeoutMs: number = REQUEST_TIMEOUT_MS,
   apiKey?: string,
+  /** Present = requete POST avec ce corps en JSON. */
+  body?: unknown,
 ): Promise<T> => {
   const key = apiKey ?? collectApiKeys(process.env)[0]
 
@@ -88,10 +90,13 @@ export const btpFetch = async <T>(
   let response: Response
   try {
     response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'POST',
       headers: {
         authorization: `Bearer ${key}`,
         accept: 'application/json',
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     })
   } finally {
@@ -240,6 +245,16 @@ async function fetchVitals(): Promise<{ data: ServerVitals; key: string }> {
 
   vitalsCache = { data: vitals, key, expiresAt: Date.now() + VITALS_CACHE_TTL_MS }
   return vitalsCache
+}
+
+/**
+ * Le serveur qui sert en ce moment, et la cle du compte qui le porte. Les deux
+ * vont ensemble: chaque compte ne voit que ses propres serveurs, une cle prise
+ * au hasard rend 404 la moitie du temps.
+ */
+export const activeServer = async (): Promise<{ serverId: string; key: string }> => {
+  const { data, key } = await loadVitals()
+  return { serverId: data.serverId, key }
 }
 
 export const getServerVitals = createServerFn({ method: 'GET' }).handler(
