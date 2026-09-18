@@ -10,6 +10,7 @@ const navItems = [
   { to: '/', label: 'Tableau de bord' },
   { to: '/modpacks', label: 'Modpacks' },
   { to: '/backups', label: 'Sauvegardes' },
+  { to: '/console', label: 'Console' },
 ] as const
 
 // La destination courante est une plaque en relief, pas une bande de couleur
