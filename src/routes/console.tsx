@@ -19,6 +19,7 @@ import {
   destructiveVerb,
   failureMessage,
   normalizeCommand,
+  parseLogLine,
 } from '@/lib/console'
 import { getConsoleLog, sendConsoleCommand } from '@/server/console'
 import { requireSession } from '@/server/session'
@@ -49,11 +50,37 @@ const MAX_LINES = 600
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const TEXT: Record<LineKind, string> = {
-  server: 'text-ink-dim',
-  sent: 'text-ink',
-  output: 'text-ink-dim',
-  error: 'text-ink-dim',
+// Rouge une erreur, ambre un avertissement: la ligne entiere, elle ne parle
+// que de ca. Sur une ligne ordinaire, seul le fil qui parle est colore -- c'est
+// l'identite de la source, pas un etat, et c'est ce qui laisse balayer mille
+// lignes sans les lire. L'horodatage et le nom du mod situent la ligne sans
+// etre la nouvelle: ils restent en retrait.
+const MESSAGE_TEXT = {
+  error: 'text-fault',
+  warn: 'text-warn',
+  info: 'text-ink-dim',
+  other: 'text-ink-dim',
+} as const
+
+const THREAD_TEXT = {
+  error: 'text-fault',
+  warn: 'text-warn',
+  info: 'text-series-players',
+  other: 'text-ink-label',
+} as const
+
+function ServerLine({ text }: { text: string }) {
+  const line = parseLogLine(text)
+  const aside = line.level === 'info' || line.level === 'other' ? 'text-ink-label' : MESSAGE_TEXT[line.level]
+
+  return (
+    <p className={`readout whitespace-pre-wrap break-words text-xs ${MESSAGE_TEXT[line.level]}`}>
+      {line.time && <span className={aside}>[{line.time}] </span>}
+      {line.thread && <span className={THREAD_TEXT[line.level]}>[{line.thread}] </span>}
+      {line.source && <span className={aside}>[{line.source}]: </span>}
+      {line.message}
+    </p>
+  )
 }
 
 // La console montre ce que le serveur raconte, comme le panel BoxToPlay, et y
@@ -125,13 +152,20 @@ function ConsolePage() {
     },
   })
 
-  // Le nouveau resultat doit etre visible sans faire defiler a la main, mais
-  // pas au prix de ramener de force quelqu'un qui lit plus haut.
+  // Le flux colle au bas tant qu'on y est -- c'est la position par defaut, et
+  // c'est la seule ou les nouvelles lignes se lisent. Remonter lache la prise,
+  // redescendre la reprend: personne n'est ramene de force au bas pendant sa
+  // lecture, et personne n'a a redescendre a la main apres.
+  const stuck = React.useRef(true)
+
+  const onScroll = () => {
+    const node = transcript.current
+    if (node) stuck.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40
+  }
+
   React.useEffect(() => {
     const node = transcript.current
-    if (!node) return
-    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80
-    if (atBottom) node.scrollTop = node.scrollHeight
+    if (node && stuck.current) node.scrollTop = node.scrollHeight
   }, [lines])
 
   const send = (command: string) => {
@@ -201,7 +235,10 @@ function ConsolePage() {
         <div className="space-y-3 p-4 sm:p-5">
           <div
             ref={transcript}
-            className="recess h-[46vh] min-h-56 overflow-y-auto rounded-[2px] p-3.5"
+            onScroll={onScroll}
+            // La console est seule sur la page: elle prend la hauteur qui reste, sans
+            // jamais deborder de l'ecran (marge = entete + barre de saisie).
+            className="recess h-[calc(100vh-19rem)] min-h-56 overflow-y-auto rounded-[2px] p-3.5"
             role="log"
             aria-live="polite"
             aria-label="Console du serveur"
@@ -212,15 +249,20 @@ function ConsolePage() {
               </p>
             ) : (
               <div className="space-y-0.5">
-                {lines.map((line) => (
-                  <p
-                    key={line.id}
-                    className={`readout whitespace-pre-wrap break-words text-xs ${TEXT[line.kind]}`}
-                  >
-                    {line.kind === 'error' && <Lamp signal="fault" className="mr-2 inline-block" />}
-                    {line.text}
-                  </p>
-                ))}
+                {lines.map((line) =>
+                  line.kind === 'server' ? (
+                    <ServerLine key={line.id} text={line.text} />
+                  ) : (
+                    <p
+                      key={line.id}
+                      className={`readout whitespace-pre-wrap break-words text-xs ${
+                        line.kind === 'error' ? 'text-fault' : 'text-ink'
+                      }`}
+                    >
+                      {line.text}
+                    </p>
+                  ),
+                )}
               </div>
             )}
           </div>
