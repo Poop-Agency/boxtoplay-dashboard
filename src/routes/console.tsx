@@ -19,8 +19,9 @@ import {
   destructiveVerb,
   failureMessage,
   normalizeCommand,
+  parseLogLine,
 } from '@/lib/console'
-import { sendConsoleCommand } from '@/server/console'
+import { getConsoleLog, sendConsoleCommand } from '@/server/console'
 import { requireSession } from '@/server/session'
 
 export const Route = createFileRoute('/console')({
@@ -28,78 +29,160 @@ export const Route = createFileRoute('/console')({
   component: ConsolePage,
 })
 
-interface Entry {
+type LineKind = 'server' | 'sent' | 'output' | 'error'
+
+interface Line {
   id: number
-  command: string
-  output?: string
-  error?: string
-  truncated?: boolean
+  kind: LineKind
+  text: string
 }
 
-// L'historique ne vit que dans l'onglet: le serveur ne garde rien, et une
-// commande rejouee au rechargement serait une commande envoyee sans le vouloir.
+// Le flux live de BoxToPlay rend l'historique recent au premier appel, puis la
+// suite par curseur. 4 s entre deux releves: le quota (120 req/60 s) est
+// partage avec le worker et le bot, et la console n'a pas besoin d'etre plus
+// vive que l'oeil.
+const POLL_MS = 4_000
+// Un chunk annonce parfois qu'il en reste: on enchaine sans attendre.
+const CHASE_MS = 250
+const RETRY_MS = 10_000
+// De quoi remonter une rotation entiere sans faire ramer le DOM.
+const MAX_LINES = 600
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Rouge une erreur, ambre un avertissement: la ligne entiere, elle ne parle
+// que de ca. Sur une ligne ordinaire, seul le fil qui parle est colore -- c'est
+// l'identite de la source, pas un etat, et c'est ce qui laisse balayer mille
+// lignes sans les lire. L'horodatage et le nom du mod situent la ligne sans
+// etre la nouvelle: ils restent en retrait.
+const MESSAGE_TEXT = {
+  error: 'text-fault',
+  warn: 'text-warn',
+  info: 'text-ink-dim',
+  other: 'text-ink-dim',
+} as const
+
+const THREAD_TEXT = {
+  error: 'text-fault',
+  warn: 'text-warn',
+  info: 'text-series-players',
+  other: 'text-ink-label',
+} as const
+
+function ServerLine({ text }: { text: string }) {
+  const line = parseLogLine(text)
+  const aside = line.level === 'info' || line.level === 'other' ? 'text-ink-label' : MESSAGE_TEXT[line.level]
+
+  return (
+    <p className={`readout whitespace-pre-wrap break-words text-xs ${MESSAGE_TEXT[line.level]}`}>
+      {line.time && <span className={aside}>[{line.time}] </span>}
+      {line.thread && <span className={THREAD_TEXT[line.level]}>[{line.thread}] </span>}
+      {line.source && <span className={aside}>[{line.source}]: </span>}
+      {line.message}
+    </p>
+  )
+}
+
+// La console montre ce que le serveur raconte, comme le panel BoxToPlay, et y
+// intercale ce qu'on lui envoie. L'historique des commandes d'avant vient donc
+// du serveur lui-meme: rien n'est garde ici entre deux visites.
 function ConsolePage() {
   const [draft, setDraft] = React.useState('')
-  const [entries, setEntries] = React.useState<Entry[]>([])
+  const [lines, setLines] = React.useState<Line[]>([])
+  const [streamError, setStreamError] = React.useState<string | null>(null)
   const [confirming, setConfirming] = React.useState<string | null>(null)
-  // -1 = en train de taper; sinon rang dans l'historique remonte au clavier.
+  // -1 = en train de taper; sinon rang dans les commandes envoyees.
   const [recall, setRecall] = React.useState(-1)
+  const [sent, setSent] = React.useState<string[]>([])
   const transcript = React.useRef<HTMLDivElement>(null)
   const nextId = React.useRef(0)
 
-  const sent = React.useMemo(() => entries.map((entry) => entry.command), [entries])
+  const push = React.useCallback((kind: LineKind, texts: string[]) => {
+    if (texts.length === 0) return
+    setLines((list) => {
+      const added = texts.map((text) => ({ id: nextId.current++, kind, text }))
+      return [...list, ...added].slice(-MAX_LINES)
+    })
+  }, [])
+
+  // Releve du flux live tant que la page est ouverte.
+  React.useEffect(() => {
+    let alive = true
+    let cursor: string | undefined
+
+    const follow = async () => {
+      while (alive) {
+        try {
+          const chunk = await getConsoleLog({ data: { cursor } })
+          if (!alive) return
+
+          cursor = chunk.cursor ?? undefined
+          // `reset`: le serveur a redemarre ou le curseur a expire. Ce qui est
+          // affiche ne suit plus rien, on repart du chunk recu.
+          if (chunk.reset) setLines([])
+          push('server', chunk.lines)
+          setStreamError(null)
+          await sleep(chunk.hasMore ? CHASE_MS : POLL_MS)
+        } catch (error) {
+          if (!alive) return
+          setStreamError(failureMessage(error instanceof Error ? error.message : 'Flux interrompu'))
+          await sleep(RETRY_MS)
+        }
+      }
+    }
+
+    void follow()
+    return () => {
+      alive = false
+    }
+  }, [push])
 
   const run = useMutation({
     mutationFn: (command: string) => sendConsoleCommand({ data: { command } }),
     onMutate: (command) => {
-      const id = nextId.current++
-      setEntries((list) => [...list, { id, command }])
-      return { id }
+      push('sent', [`> ${command}`])
+      setSent((list) => [...list, command])
     },
-    onSuccess: (result, _command, context) => {
-      setEntries((list) =>
-        list.map((entry) =>
-          entry.id === context?.id
-            ? { ...entry, output: result.output, truncated: result.truncated }
-            : entry,
-        ),
-      )
+    onSuccess: (result) => {
+      if (result.output) push('output', result.output.split('\n'))
+      if (result.truncated) push('output', ['… (réponse tronquée)'])
     },
-    onError: (error, _command, context) => {
-      const message = failureMessage(error instanceof Error ? error.message : 'Commande refusée')
-      setEntries((list) =>
-        list.map((entry) => (entry.id === context?.id ? { ...entry, error: message } : entry)),
-      )
+    onError: (error) => {
+      push('error', [failureMessage(error instanceof Error ? error.message : 'Commande refusée')])
     },
   })
 
-  // Le nouveau resultat doit etre visible sans faire defiler a la main.
+  // Le flux colle au bas tant qu'on y est -- c'est la position par defaut, et
+  // c'est la seule ou les nouvelles lignes se lisent. Remonter lache la prise,
+  // redescendre la reprend: personne n'est ramene de force au bas pendant sa
+  // lecture, et personne n'a a redescendre a la main apres.
+  const stuck = React.useRef(true)
+
+  const onScroll = () => {
+    const node = transcript.current
+    if (node) stuck.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40
+  }
+
   React.useEffect(() => {
     const node = transcript.current
-    if (node) node.scrollTop = node.scrollHeight
-  }, [entries])
+    if (node && stuck.current) node.scrollTop = node.scrollHeight
+  }, [lines])
+
+  const send = (command: string) => {
+    setDraft('')
+    setRecall(-1)
+    run.mutate(command)
+  }
 
   const submit = () => {
-    const problem = commandError(draft)
-    if (problem) return
+    if (commandError(draft)) return
 
     const command = normalizeCommand(draft)
     if (destructiveVerb(command)) {
       setConfirming(command)
       return
     }
-
-    setDraft('')
-    setRecall(-1)
-    run.mutate(command)
-  }
-
-  const confirm = () => {
-    if (!confirming) return
-    setDraft('')
-    setRecall(-1)
-    run.mutate(confirming)
-    setConfirming(null)
+    send(command)
   }
 
   // Fleches haut/bas: rappeler une commande deja envoyee plutot que la retaper.
@@ -129,50 +212,57 @@ function ConsolePage() {
     <div className="space-y-5">
       <PageHead
         title="Console"
-        note="Commandes envoyées au serveur qui sert en ce moment, par l'API BoxToPlay. Le « / » est facultatif."
+        note="Ce que le serveur raconte en direct, et ce qu'on lui envoie. Le « / » est facultatif."
       />
 
       <Panel
         title="Terminal"
-        note={`${entries.length} commande${entries.length > 1 ? 's' : ''} dans cette session · ↑ et ↓ rappellent les précédentes`}
+        note="Flux live du serveur qui sert en ce moment · ↑ et ↓ rappellent les commandes envoyées"
+        aside={
+          streamError ? (
+            <span className="flex items-center gap-2 text-xs text-ink-dim">
+              <Lamp signal="fault" />
+              Flux interrompu
+            </span>
+          ) : (
+            <span className="flex items-center gap-2 text-xs text-ink-label">
+              <Lamp signal="live" />
+              En direct
+            </span>
+          )
+        }
       >
         <div className="space-y-3 p-4 sm:p-5">
           <div
             ref={transcript}
-            className="recess h-[46vh] min-h-56 overflow-y-auto rounded-[2px] p-3.5"
+            onScroll={onScroll}
+            // La console est seule sur la page: elle prend la hauteur qui reste, sans
+            // jamais deborder de l'ecran (marge = entete + barre de saisie).
+            className="recess h-[calc(100vh-19rem)] min-h-56 overflow-y-auto rounded-[2px] p-3.5"
             role="log"
             aria-live="polite"
-            aria-label="Sortie de la console"
+            aria-label="Console du serveur"
           >
-            {entries.length === 0 ? (
+            {lines.length === 0 ? (
               <p className="readout text-xs text-ink-label">
-                Rien encore. « list » dit qui est connecté.
+                {streamError ?? 'Lecture du flux…'}
               </p>
             ) : (
-              <div className="space-y-3">
-                {entries.map((entry) => (
-                  <div key={entry.id}>
-                    <p className="readout text-xs text-ink">
-                      <span className="text-ink-label">&gt; </span>
-                      {entry.command}
+              <div className="space-y-0.5">
+                {lines.map((line) =>
+                  line.kind === 'server' ? (
+                    <ServerLine key={line.id} text={line.text} />
+                  ) : (
+                    <p
+                      key={line.id}
+                      className={`readout whitespace-pre-wrap break-words text-xs ${
+                        line.kind === 'error' ? 'text-fault' : 'text-ink'
+                      }`}
+                    >
+                      {line.text}
                     </p>
-                    {entry.error !== undefined ? (
-                      <p className="readout mt-1 flex items-start gap-2 text-xs text-ink-dim">
-                        <Lamp signal="fault" className="mt-1" />
-                        <span className="whitespace-pre-wrap break-words">{entry.error}</span>
-                      </p>
-                    ) : entry.output === undefined ? (
-                      <p className="readout mt-1 text-xs text-ink-label">Envoi…</p>
-                    ) : (
-                      <p className="readout mt-1 whitespace-pre-wrap break-words text-xs text-ink-dim">
-                        {entry.output || 'Exécutée, sans réponse.'}
-                        {entry.truncated && (
-                          <span className="text-ink-label"> … (réponse tronquée)</span>
-                        )}
-                      </p>
-                    )}
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             )}
           </div>
@@ -220,7 +310,13 @@ function ConsolePage() {
             <AlertDialogCancel className="raise rounded-[2px] border-0 text-ink hover:bg-edge">
               Annuler
             </AlertDialogCancel>
-            <AlertDialogAction className="raise rounded-[2px] text-fault hover:bg-edge" onClick={confirm}>
+            <AlertDialogAction
+              className="raise rounded-[2px] text-fault hover:bg-edge"
+              onClick={() => {
+                if (confirming) send(confirming)
+                setConfirming(null)
+              }}
+            >
               Envoyer quand même
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -6,6 +6,7 @@ import {
   destructiveVerb,
   failureMessage,
   normalizeCommand,
+  parseLogLine,
 } from './console'
 
 describe('normalizeCommand', () => {
@@ -41,6 +42,34 @@ describe('destructiveVerb', () => {
     expect(destructiveVerb('time set day')).toBeNull()
     // Le verbe compte, pas le texte: `say stop` ne coupe rien.
     expect(destructiveVerb('say stop')).toBeNull()
+  })
+})
+
+describe('parseLogLine', () => {
+  it('découpe une ligne INFO', () => {
+    const line = parseLogLine(
+      '[18Sep2026 21:23:53.254] [Server thread/INFO] [dev.uncandango.alltheleaks.AllTheLeaks/]: No memory leak detected!',
+    )
+    expect(line.time).toBe('18Sep2026 21:23:53.254')
+    expect(line.thread).toBe('Server thread/INFO')
+    expect(line.source).toBe('dev.uncandango.alltheleaks.AllTheLeaks/')
+    expect(line.message).toBe('No memory leak detected!')
+    expect(line.level).toBe('info')
+  })
+
+  it('reconnaît une erreur et un avertissement', () => {
+    expect(
+      parseLogLine('[18Sep2026 21:24:22.546] [Server thread/ERROR] [Apotheosis/]: Failed to execute')
+        .level,
+    ).toBe('error')
+    expect(parseLogLine('[21:00:00] [main/WARN]: attention').level).toBe('warn')
+  })
+
+  it('laisse passer une ligne qui ne ressemble à rien', () => {
+    const line = parseLogLine('There are 1 of a max of 100 players online: Uxy_')
+    expect(line.level).toBe('other')
+    expect(line.message).toBe('There are 1 of a max of 100 players online: Uxy_')
+    expect(line.time).toBeNull()
   })
 })
 
