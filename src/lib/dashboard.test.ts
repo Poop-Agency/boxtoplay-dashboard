@@ -14,6 +14,7 @@ import {
   trialFraction,
   trialSignal,
   workflowSignal,
+  runProgress,
 } from './dashboard'
 
 // Releve reel /metrics du 2026-09-11 sur #957036 (ATM9, 0 joueur).
@@ -208,5 +209,20 @@ describe('rotationOutlook', () => {
   it('words each verdict without a negative duration', () => {
     expect(formatOutlook(rotationOutlook('2026-08-29T21:00:00Z', slot))).toContain('2.0 h avant')
     expect(formatOutlook(rotationOutlook(null, slot))).toBe('indeterminee')
+  })
+})
+
+describe('runProgress', () => {
+  const progress = { run_id: '42', step: 4, total: 5, label: 'Transfert du monde (coupure)' }
+
+  it('affiche la phase du run en cours', () => {
+    expect(runProgress({ id: 42, status: 'in_progress' }, progress)).toBe('4/5 · Transfert du monde (coupure)')
+  })
+
+  it('ignore un autre run, un run fini, un echec et un fichier absent', () => {
+    expect(runProgress({ id: 41, status: 'in_progress' }, progress)).toBeNull()
+    expect(runProgress({ id: 42, status: 'completed' }, progress)).toBeNull()
+    expect(runProgress({ id: 42, status: 'in_progress' }, { ...progress, step: 0 })).toBeNull()
+    expect(runProgress({ id: 42, status: 'in_progress' }, null)).toBeNull()
   })
 })

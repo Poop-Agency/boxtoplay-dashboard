@@ -212,3 +212,16 @@ export function formatOutlook(outlook: RotationOutlook): string {
   if (verdict === 'skip') return `sautee — il restera ${h} h, au-dessus du seuil`
   return `rotation — il restera ${h} h`
 }
+
+/**
+ * Avancement d'un run en cours, d'apres progress.json du worker. Seulement si
+ * le fichier parle de CE run: un reste d'une rotation passee ne compte pas.
+ */
+export function runProgress(
+  run: { id: number; status: string },
+  progress: { run_id?: string; step?: number; total?: number; label?: string } | null,
+): string | null {
+  if (!progress || run.status !== 'in_progress' || String(run.id) !== String(progress.run_id)) return null
+  if (!progress.step || progress.step < 1) return null
+  return `${progress.step}/${progress.total ?? 5} · ${progress.label ?? ''}`.trim()
+}

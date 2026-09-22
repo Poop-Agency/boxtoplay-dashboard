@@ -1,6 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Toaster, toast } from 'sonner'
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 import { Fault, Gauge, Lamp, Panel, State, Well } from '@/components/ui/instrument'
 import {
@@ -14,12 +26,16 @@ import {
   niceCeil,
   outlookSignal,
   rotationOutlook,
+  runProgress,
   trialFraction,
   trialSignal,
   workflowSignal,
 } from '@/lib/dashboard'
 import { getServerHistory, getServerStats, getServerVitals } from '@/server/btp'
+import { runAction } from '@/server/actions'
+import type { ActionName } from '@/server/actions'
 import { getGistState, getRecentWorkflows } from '@/server/dashboard'
+import { hasSession } from '@/server/session'
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
@@ -71,8 +87,9 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <RotationPanel rotation={rotation} vitals={vitals} />
-        <RunLog runs={runs} />
+        <RunLog runs={runs} progress={rotation.data?.progress ?? null} />
       </div>
+      <Toaster position="top-right" theme="dark" />
     </div>
   )
 }
@@ -251,6 +268,8 @@ function RotationPanel({
               </Row>
             </dl>
 
+            <ActionBar />
+
             {fleet.length > 0 && (
               <div className="mt-4 border-t border-edge-soft pt-4">
                 <p className="engraved">Les deux comptes</p>
@@ -272,8 +291,10 @@ function RotationPanel({
 
 function RunLog({
   runs,
+  progress,
 }: {
   runs: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getRecentWorkflows>>>>
+  progress: Awaited<ReturnType<typeof getGistState>>['progress']
 }) {
   return (
     <Panel title="Journal" note="5 derniers déclenchements GitHub Actions">
@@ -314,6 +335,9 @@ function RunLog({
                     <State signal={workflowSignal(run.status, run.conclusion)}>
                       {formatWorkflowState(run.status, run.conclusion)}
                     </State>
+                    {runProgress(run, progress) && (
+                      <span className="readout mt-1 block text-xs text-ink-dim">{runProgress(run, progress)}</span>
+                    )}
                   </td>
                   <td data-label="Logs" className="py-2.5 text-right">
                     <a
@@ -332,6 +356,85 @@ function RunLog({
         )}
       </div>
     </Panel>
+  )
+}
+
+const ACTION_COPY: Record<ActionName, { label: string; title: string; body: string }> = {
+  backup: {
+    label: 'Sauvegarder',
+    title: 'Sauvegarder le monde sur Drive ?',
+    body: 'Copie du monde vivant sur Google Drive, sans coupure pour les joueurs. Environ 15 à 20 min de runner GitHub.',
+  },
+  restart: {
+    label: 'Redémarrer',
+    title: 'Redémarrer le serveur ?',
+    body: 'Repose le DNS et redémarre le serveur actuel, sans rotation ni transfert. Les joueurs sont coupés quelques minutes.',
+  },
+  rotate: {
+    label: 'Rotation',
+    title: 'Lancer une rotation ?',
+    body: "Le worker ne remplace le serveur que si l'essai arrive en fin de vie (moins de 6 h). Sinon le run se termine sans rien toucher.",
+  },
+  resync: {
+    label: 'Recaler le Gist',
+    title: 'Recaler le Gist ?',
+    body: "Remet le Gist sur le serveur réellement vivant d'après l'API BoxToPlay. À faire quand le tableau de bord ou le bot pointent un serveur mort.",
+  },
+}
+
+/** Boutons d'action: seulement une fois connecte, chacun confirme avant de partir. */
+function ActionBar() {
+  const session = useQuery({ queryKey: ['session'], queryFn: () => hasSession() })
+  const [pending, setPending] = useState<ActionName | null>(null)
+  const run = useMutation({
+    mutationFn: (action: ActionName) => runAction({ data: { action } }),
+    onSuccess: (_result, action) => {
+      toast.success(`${ACTION_COPY[action].label} : demandé. Le run apparaît dans le journal sous une minute.`)
+      setPending(null)
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Déclenchement impossible'),
+  })
+
+  if (!session.data) return null
+  const copy = pending ? ACTION_COPY[pending] : null
+
+  return (
+    <div className="mt-4 border-t border-edge-soft pt-4">
+      <p className="engraved">Actions</p>
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        {(Object.keys(ACTION_COPY) as ActionName[]).map((action) => (
+          <button
+            key={action}
+            onClick={() => setPending(action)}
+            className="raise rounded-[2px] px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-edge"
+          >
+            {ACTION_COPY[action].label}
+          </button>
+        ))}
+      </div>
+
+      <AlertDialog open={!!pending} onOpenChange={(open) => !open && setPending(null)}>
+        <AlertDialogContent className="panel border-edge-soft bg-panel text-ink">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base font-semibold text-ink">{copy?.title}</AlertDialogTitle>
+            <AlertDialogDescription className="max-w-[68ch] text-sm text-ink-dim">{copy?.body}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="raise rounded-[2px] border-0 text-ink hover:bg-edge">Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="raise rounded-[2px] text-ink hover:bg-edge"
+              onClick={(event) => {
+                event.preventDefault()
+                if (pending) run.mutate(pending)
+              }}
+              disabled={run.isPending}
+            >
+              {run.isPending ? 'Envoi…' : 'Confirmer'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }
 

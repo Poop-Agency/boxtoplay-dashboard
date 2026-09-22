@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import { loadGistState } from '@/server/gist'
+import { loadGistState, loadRotationProgress } from '@/server/gist'
+import type { RotationProgress } from '@/server/gist'
 
 // =============================================================================
 // Gist state types (only safe fields — no cookies, no FTP credentials)
@@ -13,6 +14,8 @@ export interface RotationState {
   /** Id panel ou id API selon l'espace dans lequel le state a ete ecrit. */
   modpackRef: string
   lastRotationAt: string | null
+  /** Phase de la rotation en cours; a rapprocher d'un run en cours par run_id. */
+  progress: RotationProgress | null
 }
 
 interface GitHubWorkflowRunApi {
@@ -89,5 +92,6 @@ export const getGistState = createServerFn({ method: 'GET' }).handler(async (): 
     // que plus rien n'utilise.
     modpackRef: String(state.modpack_api_id || state.modpack_version_id || '—'),
     lastRotationAt: state.last_rotation_at ?? null,
+    progress: await loadRotationProgress(),
   }
 })
