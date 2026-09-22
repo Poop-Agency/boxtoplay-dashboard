@@ -5,8 +5,8 @@
 To run this application:
 
 ```bash
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 # Building For Production
@@ -14,7 +14,7 @@ npm run dev
 To build this application for production:
 
 ```bash
-npm run build
+bun run build
 ```
 
 ## Testing
@@ -22,7 +22,7 @@ npm run build
 This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
 
 ```bash
-npm run test
+bun run test
 ```
 
 ## Styling
@@ -36,7 +36,7 @@ If you prefer not to use Tailwind CSS:
 1. Remove the application routes you no longer need (for example `src/routes/modpacks.tsx` and `src/routes/backups.tsx`)
 2. Replace the Tailwind import in `src/styles.css` with your own styles
 3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `npm uninstall @tailwindcss/vite tailwindcss`
+4. Uninstall the packages: `bun remove @tailwindcss/vite tailwindcss`
 
 
 
