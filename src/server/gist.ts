@@ -24,7 +24,16 @@ export interface GistStateRaw {
   accounts?: GistStateAccount[]
 }
 
-let cache: { value: GistStateRaw; expiresAt: number } | null = null
+/** progress.json, ecrit par le worker a chaque phase de rotation. */
+export interface RotationProgress {
+  run_id?: string
+  step?: number
+  total?: number
+  label?: string
+  updated_at?: string
+}
+
+let cache: { value: GistStateRaw; progress: RotationProgress | null; expiresAt: number } | null = null
 
 export async function loadGistState(): Promise<GistStateRaw> {
   if (cache && cache.expiresAt > Date.now()) {
@@ -66,8 +75,20 @@ export async function loadGistState(): Promise<GistStateRaw> {
   }
 
   const value = JSON.parse(fileContent) as GistStateRaw
-  cache = { value, expiresAt: Date.now() + GIST_TTL_MS }
+  let progress: RotationProgress | null = null
+  try {
+    const raw = gist.files['progress.json']?.content
+    progress = raw ? (JSON.parse(raw) as RotationProgress) : null
+  } catch {
+    // progress.json est du confort: illisible = pas d'avancement affiche.
+  }
+  cache = { value, progress, expiresAt: Date.now() + GIST_TTL_MS }
   return value
+}
+
+export async function loadRotationProgress(): Promise<RotationProgress | null> {
+  await loadGistState()
+  return cache?.progress ?? null
 }
 
 /** Id panel du serveur qui sert en ce moment, ou '' si le Gist est muet. */
