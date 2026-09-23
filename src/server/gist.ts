@@ -68,7 +68,9 @@ export async function loadGistState(): Promise<GistStateRaw> {
     throw new Error(`Failed to fetch Gist state: ${response.status}`)
   }
 
-  const gist = (await response.json()) as { files: Record<string, { content: string }> }
+  const gist = (await response.json()) as {
+    files: Record<string, { content: string; truncated?: boolean; raw_url?: string }>
+  }
   const fileContent = gist.files['boxtoplay.json']?.content
   if (!fileContent) {
     throw new Error('boxtoplay.json not found in Gist')
@@ -77,7 +79,18 @@ export async function loadGistState(): Promise<GistStateRaw> {
   const value = JSON.parse(fileContent) as GistStateRaw
   let progress: RotationProgress | null = null
   try {
-    const raw = gist.files['progress.json']?.content
+    // L'API Gist tronque les fichiers au-dela de ~1 Mo par reponse: le
+    // catalogue (4 Mo) passe avant et progress.json revient vide. raw_url
+    // porte la revision: toujours frais.
+    const file = gist.files['progress.json']
+    let raw = file?.truncated ? '' : file?.content
+    if (!raw && file?.raw_url) {
+      const rawResponse = await fetch(file.raw_url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+      raw = rawResponse.ok ? await rawResponse.text() : ''
+    }
     progress = raw ? (JSON.parse(raw) as RotationProgress) : null
   } catch {
     // progress.json est du confort: illisible = pas d'avancement affiche.
