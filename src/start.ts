@@ -5,13 +5,14 @@ import { requestHasSession } from './lib/auth'
 
 // Le tableau de bord reste lisible sans mot de passe: tout le reste est
 // protege par defaut, une nouvelle page ou server function comprise.
-const PUBLIC_PAGES = new Set(['/', '/login', '/api/login', '/api/logout'])
+const PUBLIC_PAGES = new Set(['/', '/stats', '/login', '/api/login', '/api/logout'])
 const PUBLIC_SERVER_FNS = new Set([
   'getRecentWorkflows',
   'getGistState',
   'getServerVitals',
   'getServerStats',
   'getServerHistory',
+  'getPlayerStats',
   'hasSession',
 ])
 

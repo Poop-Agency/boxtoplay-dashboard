@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StatsRouteImport } from './routes/stats'
 import { Route as ModpacksRouteImport } from './routes/modpacks'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ConsoleRouteImport } from './routes/console'
@@ -17,6 +18,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
 import { Route as ApiLoginRouteImport } from './routes/api/login'
 
+const StatsRoute = StatsRouteImport.update({
+  id: '/stats',
+  path: '/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ModpacksRoute = ModpacksRouteImport.update({
   id: '/modpacks',
   path: '/modpacks',
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/console': typeof ConsoleRoute
   '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
+  '/stats': typeof StatsRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
 }
@@ -68,6 +75,7 @@ export interface FileRoutesByTo {
   '/console': typeof ConsoleRoute
   '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
+  '/stats': typeof StatsRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
 }
@@ -78,6 +86,7 @@ export interface FileRoutesById {
   '/console': typeof ConsoleRoute
   '/login': typeof LoginRoute
   '/modpacks': typeof ModpacksRoute
+  '/stats': typeof StatsRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
 }
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/console'
     | '/login'
     | '/modpacks'
+    | '/stats'
     | '/api/login'
     | '/api/logout'
   fileRoutesByTo: FileRoutesByTo
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/console'
     | '/login'
     | '/modpacks'
+    | '/stats'
     | '/api/login'
     | '/api/logout'
   id:
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/console'
     | '/login'
     | '/modpacks'
+    | '/stats'
     | '/api/login'
     | '/api/logout'
   fileRoutesById: FileRoutesById
@@ -117,12 +129,20 @@ export interface RootRouteChildren {
   ConsoleRoute: typeof ConsoleRoute
   LoginRoute: typeof LoginRoute
   ModpacksRoute: typeof ModpacksRoute
+  StatsRoute: typeof StatsRoute
   ApiLoginRoute: typeof ApiLoginRoute
   ApiLogoutRoute: typeof ApiLogoutRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/stats': {
+      id: '/stats'
+      path: '/stats'
+      fullPath: '/stats'
+      preLoaderRoute: typeof StatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/modpacks': {
       id: '/modpacks'
       path: '/modpacks'
@@ -181,6 +201,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConsoleRoute: ConsoleRoute,
   LoginRoute: LoginRoute,
   ModpacksRoute: ModpacksRoute,
+  StatsRoute: StatsRoute,
   ApiLoginRoute: ApiLoginRoute,
   ApiLogoutRoute: ApiLogoutRoute,
 }
