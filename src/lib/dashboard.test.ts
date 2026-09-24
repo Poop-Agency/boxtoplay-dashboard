@@ -3,8 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   formatDisk,
   formatMemory,
-  formatOutlook,
-  rotationOutlook,
   formatRemaining,
   formatWorkflowState,
   getWorkflowTone,
@@ -92,22 +90,20 @@ describe('workflowSignal', () => {
 })
 
 describe('nextRotationAt', () => {
-  const at = (iso: string) => Date.parse(iso)
-
-  it('picks the next slot later today', () => {
-    expect(nextRotationAt(at('2026-08-29T09:12:00Z'))?.toISOString()).toBe('2026-08-29T15:00:00.000Z')
+  it('rotates 2h30 before the trial dies', () => {
+    expect(nextRotationAt('2026-09-24T23:43:19Z', '2026-09-24T12:06:38Z')?.toISOString()).toBe('2026-09-24T21:13:19.000Z')
   })
 
-  it('wraps to tomorrow once the last slot has passed', () => {
-    expect(nextRotationAt(at('2026-08-29T23:30:00Z'))?.toISOString()).toBe('2026-08-30T07:00:00.000Z')
+  it('falls back to last rotation + 10h', () => {
+    expect(nextRotationAt(null, '2026-09-22T17:25:38Z')?.toISOString()).toBe('2026-09-23T03:25:38.000Z')
   })
 
-  it('does not return the slot it is sitting exactly on', () => {
-    expect(nextRotationAt(at('2026-08-29T15:00:00Z'))?.toISOString()).toBe('2026-08-29T23:00:00.000Z')
+  it('never lets a stale expiry push past last rotation + 10h', () => {
+    expect(nextRotationAt('2026-09-26T00:00:00Z', '2026-09-24T12:00:00Z')?.toISOString()).toBe('2026-09-24T22:00:00.000Z')
   })
 
-  it('has nothing to point at without slots', () => {
-    expect(nextRotationAt(at('2026-08-29T09:00:00Z'), [])).toBeNull()
+  it('has nothing to point at without dates', () => {
+    expect(nextRotationAt(null, null)).toBeNull()
   })
 })
 
@@ -164,51 +160,6 @@ describe('formatRemaining', () => {
 
   it('names an expired trial rather than showing a negative', () => {
     expect(formatRemaining('2026-08-29T08:00:00Z', now)).toBe('expiré')
-  })
-})
-
-describe('rotationOutlook', () => {
-  const slot = new Date('2026-08-29T23:00:00Z')
-
-  it('predicts a rotation when the trial dips under the guard', () => {
-    // 03:51Z le lendemain => 4,85 h au creneau de 23:00Z, sous les 6 h.
-    const out = rotationOutlook('2026-08-30T03:51:00Z', slot)
-    expect(out.verdict).toBe('rotate')
-    expect(out.hoursAtSlot).toBeCloseTo(4.85, 2)
-  })
-
-  it('predicts a skip while the trial still holds above the guard', () => {
-    const out = rotationOutlook('2026-08-30T06:16:00Z', slot)
-    expect(out.verdict).toBe('skip')
-    expect(out.hoursAtSlot).toBeCloseTo(7.27, 2)
-  })
-
-  // Le cas qui compte: personne ne passe avant la mort de l'essai.
-  it('flags a trial that dies before the worker even wakes', () => {
-    const out = rotationOutlook('2026-08-29T21:00:00Z', slot)
-    expect(out.verdict).toBe('expired')
-    expect(out.hoursAtSlot).toBeCloseTo(-2, 5)
-  })
-
-  it('treats the guard boundary as a rotation, matching the worker', () => {
-    // worker.py skippe sur `left > seuil`, donc pile 6 h tourne.
-    const out = rotationOutlook('2026-08-30T05:00:00Z', slot)
-    expect(out.verdict).toBe('rotate')
-  })
-
-  it('rotates whatever the life when the guard is disabled', () => {
-    expect(rotationOutlook('2026-08-30T06:16:00Z', slot, 0).verdict).toBe('rotate')
-  })
-
-  it('stays unknown rather than guessing', () => {
-    expect(rotationOutlook(null, slot).verdict).toBe('unknown')
-    expect(rotationOutlook('2026-08-30T03:51:00Z', null).verdict).toBe('unknown')
-    expect(rotationOutlook('pas une date', slot).verdict).toBe('unknown')
-  })
-
-  it('words each verdict without a negative duration', () => {
-    expect(formatOutlook(rotationOutlook('2026-08-29T21:00:00Z', slot))).toContain('2.0 h avant')
-    expect(formatOutlook(rotationOutlook(null, slot))).toBe('indeterminee')
   })
 })
 

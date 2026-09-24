@@ -18,14 +18,11 @@ import { Fault, Gauge, Lamp, Panel, State, Well } from '@/components/ui/instrume
 import {
   formatDisk,
   formatMemory,
-  formatOutlook,
   formatRemaining,
   formatWorkflowState,
   loadSignal,
   nextRotationAt,
   niceCeil,
-  outlookSignal,
-  rotationOutlook,
   runProgress,
   trialFraction,
   trialSignal,
@@ -228,8 +225,7 @@ function RotationPanel({
   rotation: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getGistState>>>>
   vitals: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getServerVitals>>>>
 }) {
-  const next = nextRotationAt()
-  const outlook = rotationOutlook(vitals.data?.expiresAt ?? null, next)
+  const next = nextRotationAt(vitals.data?.expiresAt ?? null, rotation.data?.lastRotationAt ?? null)
   const fleet = vitals.data?.fleet ?? []
 
   return (
@@ -253,17 +249,10 @@ function RotationPanel({
                   {rotation.data.lastRotationAt ? formatShort(rotation.data.lastRotationAt) : '—'}
                 </span>
               </Row>
-              {/* Le cron GitHub tire souvent en retard, jusqu'a quatre heures
-                  observees: cette heure est un plancher, pas une promesse. */}
-              <Row label="Prochaine au plus tôt">
-                <span className="readout text-sm text-ink-dim" title="Le cron GitHub peut partir jusqu'à ~4 h en retard">
+              {/* Declenchee par le bot, 2h30 avant la fin de l'essai. */}
+              <Row label="Prochaine">
+                <span className="readout text-sm text-ink-dim" title="Lancée par le bot 2h30 avant la fin de l'essai">
                   {next ? next.toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                </span>
-              </Row>
-              <Row label="Ce créneau">
-                <span className="flex items-center gap-2 text-sm text-ink">
-                  <Lamp signal={outlookSignal(outlook.verdict)} />
-                  {formatOutlook(outlook)}
                 </span>
               </Row>
             </dl>
