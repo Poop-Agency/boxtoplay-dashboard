@@ -8,6 +8,7 @@ import { hasSession } from '@/server/session'
 
 const navItems = [
   { to: '/', label: 'Tableau de bord' },
+  { to: '/stats', label: 'Joueurs' },
   { to: '/modpacks', label: 'Modpacks' },
   { to: '/backups', label: 'Sauvegardes' },
   { to: '/console', label: 'Console' },
