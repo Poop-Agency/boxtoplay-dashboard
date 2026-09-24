@@ -43,32 +43,20 @@ export function workflowSignal(status: string, conclusion: string | null): Signa
 }
 
 /**
- * Les creneaux de rotation sont ceux du cron GitHub de schedule.yml, en UTC.
- * GitHub les tire souvent en retard (jusqu'a 4h20 observees le 2026-08-28):
- * l'heure rendue ici est la plus proche possible, pas une promesse.
+ * Heure de la prochaine rotation, meme regle que le bot (boxtoplay-bot/rotation.js):
+ * 2h30 avant la mort de l'essai, sinon derniere rotation + 10h; les deux
+ * connues, la plus tot. C'est le bot qui la declenche, le cron GitHub (qui
+ * derive de plusieurs heures) n'est plus qu'un filet.
  */
-export const ROTATION_SLOTS_UTC = [7, 15, 23] as const
+export const ROTATION_LEAD_MS = 2.5 * 60 * 60 * 1000
+export const ROTATE_AGE_MS = 10 * 60 * 60 * 1000
 
-export function nextRotationAt(
-  now: number = Date.now(),
-  slots: readonly number[] = ROTATION_SLOTS_UTC,
-): Date | null {
-  if (slots.length === 0) return null
-
-  const ordered = [...slots].sort((a, b) => a - b)
-  const date = new Date(now)
-
-  for (const hour of ordered) {
-    const candidate = new Date(
-      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, 0, 0, 0),
-    )
-    if (candidate.getTime() > now) return candidate
-  }
-
-  // Tous les creneaux du jour sont passes: le premier de demain.
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1, ordered[0], 0, 0, 0),
-  )
+export function nextRotationAt(expiresAt: string | null, lastRotationAt: string | null): Date | null {
+  const candidates = [
+    Date.parse(expiresAt ?? '') - ROTATION_LEAD_MS,
+    Date.parse(lastRotationAt ?? '') + ROTATE_AGE_MS,
+  ].filter(Number.isFinite)
+  return candidates.length ? new Date(Math.min(...candidates)) : null
 }
 
 /**
@@ -158,59 +146,6 @@ export function niceCeil(value: number, floor: number): number {
     if (multiple * step >= target) return multiple * step
   }
   return 10 * step
-}
-
-/**
- * Le worker refuse de tourner tant que le serveur actif tient encore plus de
- * ROTATION_SKIP_ABOVE_HOURS heures (defaut 6, cf. worker.py). Predire ce que
- * fera le prochain creneau evite d'aller lire les logs pour savoir si la nuit
- * tient.
- *
- * `expired` est le cas qui compte: l'essai meurt AVANT que le worker ne se
- * reveille, donc le serveur tombe sans que personne ne soit prevenu.
- */
-export const ROTATION_SKIP_ABOVE_HOURS = 6
-
-export type RotationVerdict = 'rotate' | 'skip' | 'expired' | 'unknown'
-
-export interface RotationOutlook {
-  verdict: RotationVerdict
-  /** Heures de vie restantes AU MOMENT du creneau, negatif si deja mort. */
-  hoursAtSlot: number | null
-}
-
-export function rotationOutlook(
-  expiresAt: string | null,
-  slot: Date | null,
-  skipAboveHours: number = ROTATION_SKIP_ABOVE_HOURS,
-): RotationOutlook {
-  if (!expiresAt || !slot) return { verdict: 'unknown', hoursAtSlot: null }
-
-  const target = Date.parse(expiresAt)
-  if (Number.isNaN(target)) return { verdict: 'unknown', hoursAtSlot: null }
-
-  const hoursAtSlot = (target - slot.getTime()) / 3_600_000
-
-  if (hoursAtSlot <= 0) return { verdict: 'expired', hoursAtSlot }
-  if (skipAboveHours > 0 && hoursAtSlot > skipAboveHours) return { verdict: 'skip', hoursAtSlot }
-  return { verdict: 'rotate', hoursAtSlot }
-}
-
-export function outlookSignal(verdict: RotationVerdict): Signal {
-  if (verdict === 'expired') return 'fault'
-  if (verdict === 'rotate') return 'live'
-  if (verdict === 'skip') return 'idle'
-  return 'idle'
-}
-
-export function formatOutlook(outlook: RotationOutlook): string {
-  const { verdict, hoursAtSlot } = outlook
-  if (verdict === 'unknown' || hoursAtSlot === null) return 'indeterminee'
-
-  const h = Math.abs(hoursAtSlot).toFixed(1)
-  if (verdict === 'expired') return `l'essai meurt ${h} h avant le creneau`
-  if (verdict === 'skip') return `sautee — il restera ${h} h, au-dessus du seuil`
-  return `rotation — il restera ${h} h`
 }
 
 /**
